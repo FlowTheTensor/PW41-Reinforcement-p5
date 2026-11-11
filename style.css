@@ -1,0 +1,153 @@
+/* =====================================================================
+   Corporate Design der Jakob-Preh-Schule (bsnes.de)
+   Papierweiß, Logo-Schwarz, Schul-Rot als Akzent, Senf als 2. Akzent
+   Schriften: Quicksand (Titel), Inter (Text), JetBrains Mono (Zahlen)
+   ===================================================================== */
+:root {
+  --bg: #fbf9f5;
+  --surface: #ffffff;
+  --surface-2: #f3eee6;
+  --ink: #1d1d1c;
+  --ink-soft: #5b5852;
+  --ink-faint: #7d7a72;
+  --accent: #c81e3a;
+  --accent-dark: #a5182f;
+  --line: #e7e1d6;
+  --line-soft: #efeae1;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--line-soft);
+  color: var(--ink);
+  font-family: Inter, Arial, Helvetica, sans-serif;
+}
+
+canvas {
+  display: block;
+}
+
+/* Hülle: Zeichenfläche + darübergelegte Bedienelemente */
+.huelle {
+  position: relative;
+  margin: 12px auto;
+}
+
+.huelle canvas {
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 12px rgba(29, 29, 28, 0.08);
+}
+
+/* ---------------------------------------------------------------- */
+/* Grundstil aller Bedienelemente                                    */
+/* ---------------------------------------------------------------- */
+.ui {
+  position: absolute;
+  box-sizing: border-box;
+  font: inherit;
+  font-family: Inter, Arial, Helvetica, sans-serif;
+  font-size: 1em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+img.ui.logo {
+  height: auto;
+}
+
+button.ui {
+  height: 2.1em;
+  padding: 0 0.8em;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+button.ui:hover:not(:disabled) {
+  border-color: var(--ink-faint);
+  background: var(--bg);
+}
+
+button.ui:focus-visible,
+select.ui:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button.ui:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Modus-Umschalter in der Kopfzeile */
+button.ui.kopf.aktiv {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #ffffff;
+}
+
+/* Hauptaktion: Schul-Rot */
+button.ui.primaer {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+button.ui.primaer:hover:not(:disabled) {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+/* zweite Aktion: Logo-Schwarz */
+button.ui.dunkel {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #ffffff;
+}
+
+button.ui.dunkel:hover:not(:disabled) {
+  background: #3a3936;
+  border-color: #3a3936;
+}
+
+/* Auswahllisten, Kästchen, Regler */
+select.ui {
+  height: 1.9em;
+  padding: 0 0.3em;
+  border: 1px solid var(--line);
+  border-radius: 0.5em;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.ui input[type="checkbox"] {
+  width: 1.05em;
+  height: 1.05em;
+  margin: 0 0.4em 0 0;
+  vertical-align: middle;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.ui label,
+.ui span {
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+input[type="range"].ui {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+span.ui {
+  line-height: 1.9em;
+  color: var(--ink-soft);
+  cursor: default;
+}
