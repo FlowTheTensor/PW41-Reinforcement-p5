@@ -32,7 +32,11 @@
 // Layout (logisches Raster 1600 × 900, wird auf die Fenstergröße skaliert)
 // -----------------------------------------------------------------------------
 const W = 1600;
-const H = 900;
+// Kopfzeile (0 … 56) und Beispiel-Leiste (56 … 56 + LEISTE) liegen über dem Inhalt.
+// Der Inhalt wird im Raster 1600 × 900 gezeichnet und um LEISTE nach unten verschoben.
+const LEISTE = 48;
+const H_INHALT = 900;
+const H = H_INHALT + LEISTE;
 let S = 1;
 
 // Schriften der Jakob-Preh-Schule (Google Fonts, siehe index.html).
@@ -200,6 +204,10 @@ function draw() {
     push();
     scale(S);
     zeichneKopf();
+    zeichneBeispielLeiste();
+    push();
+    translate(0, LEISTE);
+    zeichneStatus();
     zeichneUmgebung();
     zeichneKurve();
     zeichneQTabelle();
@@ -207,6 +215,7 @@ function draw() {
     zeichneEinstellungen();
     zeichneTooltip();
     zeichneFehlerMeldung();
+    pop();
     pop();
     aktualisiereUi();
   } catch (err) {
@@ -575,7 +584,7 @@ function mausX() {
 }
 
 function mausY() {
-  return mouseY / S;
+  return mouseY / S - LEISTE;
 }
 
 // Karte im Stil der Schule: weiße Fläche, feine Linie, Titel mit rotem Punkt
@@ -687,12 +696,46 @@ function zeichneKopf() {
   fill(...FARBE.text);
   textFont(TITEL);
   textStyle(BOLD);
-  textSize(20);
+  textSize(21);
   textAlign(LEFT, CENTER);
-  text(sz.titel, 196, 16);
+  text(sz.titel, 194, 21);
   textStyle(NORMAL);
+  textFont(SCHRIFT);
+  textSize(13);
+  fill(...FARBE.blass);
+  text("Reinforcement Learning · Q-Learning", 194, 41);
+}
 
+// Beispiel-Leiste: hellrot hinterlegt, links „Beispiel“, daneben ein Reiter je
+// Beispiel (HTML-Knöpfe, siehe ui.js). Gleiches Schema in allen PW-Programmen.
+function zeichneBeispielLeiste() {
+  noStroke();
+  fill(253, 240, 242);
+  rect(0, 56, W, LEISTE);
+  stroke(240, 200, 208);
+  strokeWeight(1);
+  line(0, 56 + LEISTE, W, 56 + LEISTE);
+  noStroke();
+  fill(...FARBE.akzent);
+  textFont(TITEL);
+  textStyle(BOLD);
+  textSize(15);
+  textAlign(LEFT, CENTER);
+  text("Beispiel", 26, 56 + LEISTE / 2);
+  textStyle(NORMAL);
+  // kleiner Pfeil zu den Reitern
+  stroke(...FARBE.akzent);
+  strokeWeight(2);
+  const px = 26 + textWidth("Beispiel") + 10;
+  const py = 56 + LEISTE / 2;
+  line(px, py - 5, px + 5, py);
+  line(px + 5, py, px, py + 5);
+  noStroke();
+}
+
+function zeichneStatus() {
   fill(...FARBE.grau);
+  noStroke();
   textFont(SCHRIFT);
   textSize(13);
   textAlign(LEFT, CENTER);
@@ -1483,7 +1526,7 @@ function zeichneTooltip() {
   if (x + b > W - 8) {
     x = mausX() - b - 10;
   }
-  if (y + h > H - 8) {
+  if (y + h > H_INHALT - 8) {
     y = mausY() - h - 10;
   }
   fill(...FARBE.text, 235);

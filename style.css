@@ -153,34 +153,6 @@ span.ui {
 }
 
 /* Auswahl der Aufgabe unter dem Titel */
-/* Auswahl der Aufgabe unter dem Titel – gut sichtbar: rote Umrandung, roter Pfeil */
-select.ui.aufgabe {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 1.75em;
-  padding: 0 2em 0 0.8em;
-  font-size: 0.87em;
-  font-weight: 700;
-  color: var(--accent);
-  border: 1.5px solid var(--accent);
-  border-radius: 999px;
-  background-color: #fdf0f2;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23c81e3a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.75em center;
-  background-size: 0.8em auto;
-}
-
-select.ui.aufgabe:hover:not(:disabled) {
-  background-color: #fbe1e6;
-}
-
-select.ui.aufgabe option {
-  color: var(--ink);
-  background: var(--surface);
-  font-weight: 600;
-}
-
 /* kleiner Knopf in einer Panel-Kopfzeile */
 button.ui.klein {
   height: 1.75em;
@@ -301,4 +273,30 @@ select.ui:disabled {
 .export button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- */
+/* Beispiel-Leiste unter der Kopfzeile (gleiches Schema in allen PW) */
+/* ---------------------------------------------------------------- */
+button.ui.beispiel {
+  height: 2.15em;
+  padding: 0 1em;
+  border: 1.5px solid var(--accent);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+button.ui.beispiel:hover:not(:disabled) {
+  background: #fbe1e6;
+  border-color: var(--accent);
+}
+
+button.ui.beispiel.aktiv,
+button.ui.beispiel.aktiv:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(200, 30, 58, 0.3);
 }

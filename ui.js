@@ -23,7 +23,9 @@ function layoutUi() {
   huelle.style("width", width + "px");
   huelle.style("font-size", 15 * S + "px");
   for (const p of uiPositionen) {
-    p.el.position(p.x * S, p.y * S);
+    // alles unterhalb der Kopfzeile rutscht um die Beispiel-Leiste nach unten
+    const y = p.y >= 56 && !p.el.hasClass("beispiel") ? p.y + LEISTE : p.y;
+    p.el.position(p.x * S, y * S);
     if (p.w) {
       p.el.style("width", p.w * S + "px");
     }
@@ -43,17 +45,21 @@ function erstelleUi() {
   // --- Kopfzeile -------------------------------------------------------------
   ui.logo = platziere(createImg("assets/logo-jps.png", "Logo der Jakob-Preh-Schule"), 14, 3, 122, "logo");
 
-  ui.aufgabe = platziere(createSelect(), 192, 29, 236, "aufgabe");
-  for (const id of SZENARIO_LISTE) {
-    ui.aufgabe.option("Aufgabe: " + SZENARIEN[id].name, id);
-  }
-  ui.aufgabe.changed(() => {
-    if (laeuft) {
-      ui.aufgabe.selected(sz.id);
-    } else {
-      szenarioWechseln(ui.aufgabe.value());
-    }
-    ui.aufgabe.elt.blur();
+  // Beispiel-Leiste: ein Reiter je Beispiel (Reihenfolge wie in index.html)
+  ui.beispiele = {};
+  let bx = 128;
+  SZENARIO_LISTE.forEach((id, i) => {
+    const text = `${i + 1} · ${SZENARIEN[id].name}`;
+    const b = 34 + text.length * 8.6;
+    ui.beispiele[id] = platziere(createButton(text), bx, 63, b, "beispiel");
+    ui.beispiele[id].attribute("title", "Beispiel wechseln (die Q-Tabelle jedes Beispiels bleibt erhalten)");
+    ui.beispiele[id].mousePressed(() => {
+      if (!laeuft) {
+        szenarioWechseln(id);
+      }
+      ui.beispiele[id].elt.blur();
+    });
+    bx += b + 10;
   });
 
   ui.modi = {};
@@ -164,7 +170,6 @@ function erstelleUi() {
 
 // Bedienelemente an das aktive Szenario anpassen (Optionen, Episoden …)
 function uiAusSzenario() {
-  ui.aufgabe.selected(sz.id);
   for (let i = 0; i < 2; i++) {
     const o = sz.optionen[i];
     const { name, liste } = ui.opt[i];
@@ -274,8 +279,13 @@ function aktualisiereUi() {
     beschrifte(ui.schritt, "Schritt ▶ (→)");
   }
 
+  for (const id of Object.keys(ui.beispiele)) {
+    klasse(ui.beispiele[id], "aktiv", id === sz.id);
+    sperre(ui.beispiele[id], laeuft && id !== sz.id);
+    ui.beispiele[id].attribute("aria-pressed", id === sz.id ? "true" : "false");
+  }
   zeige(ui.export, !!sz.export);
-  for (const el of [ui.neu, ui.laden, ui.aufgabe, ui.export, ui.opt[0].liste, ui.opt[1].liste]) {
+  for (const el of [ui.neu, ui.laden, ui.export, ui.opt[0].liste, ui.opt[1].liste]) {
     sperre(el, laeuft);
   }
 }

@@ -2,7 +2,7 @@
 
 Ein Agent lernt eine Aufgabe – nur durch Ausprobieren und Belohnung. Er kennt weder die Physik noch die Regeln, er bekommt nur Belohnungen und Strafen. Jeder Schritt des Q-Learnings lässt sich mit allen Zahlen und Formeln verfolgen.
 
-Oben unter dem Titel wird die Aufgabe gewählt (rot umrandete Auswahl „Aufgabe: …“). Beim Start ist die Sortierstation eingestellt.
+Die Aufgabe wird in der roten **Beispiel-Leiste** unter der Kopfzeile gewählt. Beim Start ist die Sortierstation eingestellt.
 
 | Aufgabe | Worum geht es? | Zustände × Aktionen | Schwerpunkt |
 |---|---|---|---|
@@ -274,6 +274,22 @@ Das ist kurz und leistungsfähig, aber das Lernen bleibt eine Blackbox. Hier wir
 | `szenarien/lager.js` | Hochregallager |
 | `assets/logo-jps.png` | Logo der Jakob-Preh-Schule |
 | `libraries/p5.min.js` | p5.js (lokal, damit die Seite auch offline läuft) |
+
+## Beispiel-Leiste (gemeinsames Schema für alle PW-Programme)
+
+Damit sich alle Programme der Reihe gleich bedienen lassen, wird das Beispiel überall gleich gewählt:
+
+| Element | Festlegung |
+|---|---|
+| Ort | eigene Leiste direkt unter der Kopfzeile, über die ganze Breite, 48 px hoch (logisches Raster), der restliche Inhalt rutscht um 48 px nach unten |
+| Hintergrund | Hellrot `#fdf0f2`, unten eine feine Linie `#f0c8d0` |
+| Beschriftung | links „Beispiel ›“ in Schul-Rot `#c81e3a`, Quicksand fett, 15 px |
+| Reiter | ein Knopf je Beispiel, nebeneinander, Text „1 · Name“, „2 · Name“ …, Pillenform, 1,5 px roter Rand, rote Schrift auf Weiß |
+| aktives Beispiel | Reiter rot gefüllt, weiße Schrift, leichter Schatten |
+| Verhalten | ein Klick wechselt das Beispiel; während ein Lauf/Training läuft, sind die anderen Reiter gesperrt; jedes Beispiel behält seinen Stand |
+| Reihenfolge | das erste Beispiel ist beim Start aktiv |
+
+Umsetzung hier: Reiter in `ui.js` (Klasse `beispiel`), Leiste in `zeichneBeispielLeiste()` in `sketch.js`, Stil am Ende von `style.css`.
 
 ## Lokal starten
 
