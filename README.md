@@ -2,12 +2,12 @@
 
 Ein Agent lernt eine Aufgabe – nur durch Ausprobieren und Belohnung. Er kennt weder die Physik noch die Regeln, er bekommt nur Belohnungen und Strafen. Jeder Schritt des Q-Learnings lässt sich mit allen Zahlen und Formeln verfolgen.
 
-Oben unter dem Titel wird die Aufgabe gewählt:
+Oben unter dem Titel wird die Aufgabe gewählt (rot umrandete Auswahl „Aufgabe: …“). Beim Start ist die Sortierstation eingestellt.
 
 | Aufgabe | Worum geht es? | Zustände × Aktionen | Schwerpunkt |
 |---|---|---|---|
-| **Wagen mit Stab** | Stab balancieren (CartPole) | 48 bzw. 432 × 2 | Messwerte in Fächer einsortieren, Regelung |
 | **Sortierstation** | Werkstücke nach Sensorsignalen in Rutschen sortieren | 8 bzw. 32 × 4 | sofortige Belohnung, Timing, Sensorstörungen |
+| **Wagen mit Stab** | Stab balancieren (CartPole) | 48 bzw. 432 × 2 | Messwerte in Fächer einsortieren, Regelung |
 | **Wartung Bearbeitungsstation** | produzieren oder warten? (Predictive Maintenance) | 14 × 2 | Abzinsung γ: kurzsichtig gegen weitsichtig |
 | **Hochregallager** | ankommende Teile nah oder fern einlagern | 60 × 2 | verzögerte Folgen, ABC-Strategie |
 

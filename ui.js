@@ -43,9 +43,9 @@ function erstelleUi() {
   // --- Kopfzeile -------------------------------------------------------------
   ui.logo = platziere(createImg("assets/logo-jps.png", "Logo der Jakob-Preh-Schule"), 14, 3, 122, "logo");
 
-  ui.aufgabe = platziere(createSelect(), 190, 30, 244, "aufgabe");
+  ui.aufgabe = platziere(createSelect(), 192, 29, 236, "aufgabe");
   for (const id of SZENARIO_LISTE) {
-    ui.aufgabe.option(SZENARIEN[id].name, id);
+    ui.aufgabe.option("Aufgabe: " + SZENARIEN[id].name, id);
   }
   ui.aufgabe.changed(() => {
     if (laeuft) {

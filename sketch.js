@@ -689,7 +689,7 @@ function zeichneKopf() {
   textStyle(BOLD);
   textSize(20);
   textAlign(LEFT, CENTER);
-  text(sz.titel, 194, 17);
+  text(sz.titel, 196, 16);
   textStyle(NORMAL);
 
   fill(...FARBE.grau);

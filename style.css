@@ -153,19 +153,32 @@ span.ui {
 }
 
 /* Auswahl der Aufgabe unter dem Titel */
+/* Auswahl der Aufgabe unter dem Titel – gut sichtbar: rote Umrandung, roter Pfeil */
 select.ui.aufgabe {
-  height: 1.6em;
-  padding: 0 0.2em;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 1.75em;
+  padding: 0 2em 0 0.8em;
   font-size: 0.87em;
-  font-weight: 600;
-  color: var(--ink-soft);
-  border: 1px solid transparent;
-  background: transparent;
+  font-weight: 700;
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+  border-radius: 999px;
+  background-color: #fdf0f2;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23c81e3a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75em center;
+  background-size: 0.8em auto;
 }
 
 select.ui.aufgabe:hover:not(:disabled) {
-  border-color: var(--line);
-  background: var(--bg);
+  background-color: #fbe1e6;
+}
+
+select.ui.aufgabe option {
+  color: var(--ink);
+  background: var(--surface);
+  font-weight: 600;
 }
 
 /* kleiner Knopf in einer Panel-Kopfzeile */
