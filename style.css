@@ -151,3 +151,141 @@ span.ui {
   color: var(--ink-soft);
   cursor: default;
 }
+
+/* Auswahl der Aufgabe unter dem Titel */
+select.ui.aufgabe {
+  height: 1.6em;
+  padding: 0 0.2em;
+  font-size: 0.87em;
+  font-weight: 600;
+  color: var(--ink-soft);
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+select.ui.aufgabe:hover:not(:disabled) {
+  border-color: var(--line);
+  background: var(--bg);
+}
+
+/* kleiner Knopf in einer Panel-Kopfzeile */
+button.ui.klein {
+  height: 1.75em;
+  font-size: 0.85em;
+  padding: 0 0.7em;
+}
+
+select.ui:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- */
+/* Fenster für den SPS-Export                                        */
+/* ---------------------------------------------------------------- */
+.export {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(29, 29, 28, 0.35);
+  border-radius: 12px;
+}
+
+.export-karte {
+  width: min(62em, 92%);
+  max-height: 88%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+  padding: 1em 1.2em 1.1em;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(29, 29, 28, 0.2);
+  box-sizing: border-box;
+}
+
+.export-kopf {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+}
+
+.export-kopf .punkt {
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: #e4002b;
+}
+
+.export-kopf h2 {
+  flex: 1;
+  margin: 0;
+  font-family: Quicksand, Arial, sans-serif;
+  font-size: 1.15em;
+}
+
+.export-zu {
+  border: none;
+  background: none;
+  font-size: 1.1em;
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+
+.export-text {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.export textarea {
+  flex: 1;
+  min-height: 22em;
+  resize: none;
+  padding: 0.7em;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8em;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.export-fuss {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+}
+
+.export-fuss button {
+  height: 2.1em;
+  padding: 0 1em;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.export-fuss button + button {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.export-status {
+  color: var(--ink-soft);
+}
+
+.export button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

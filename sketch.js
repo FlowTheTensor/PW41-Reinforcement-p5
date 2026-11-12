@@ -1,20 +1,27 @@
 // =============================================================================
-//  KI balanciert · Reinforcement Learning
-//  Ein Agent lernt mit Q-Learning, einen Stab auf einem Wagen zu balancieren –
-//  nur durch Ausprobieren und Belohnung, ohne die Physik zu kennen.
+//  KI lernt · Reinforcement Learning
+//  Ein Agent lernt mit Q-Learning – nur durch Ausprobieren und Belohnung.
+//  Aufgaben: Wagen mit Stab, Sortierstation, Wartung, Hochregallager.
 // =============================================================================
 //
 //  Dateien
-//    umgebung.js  Wagen mit Stab (Physik wie Gymnasium "CartPole-v1")
-//    agent.js     Q-Learning mit Tabelle
-//    ui.js        Knöpfe, Auswahllisten, Regler
-//    sketch.js    Ablauf, Zeichnen, Erklärungen (diese Datei)
+//    agent.js              Q-Learning mit Tabelle (kennt die Aufgabe nicht)
+//    ui.js                 Knöpfe, Auswahllisten, Regler
+//    sketch.js             Ablauf, Phasen, Lernkurve, Q-Tabelle, Erklärung (diese Datei)
+//    szenarien/*.js        die Aufgaben: Umgebung, Zeichnung, Erklärtexte
 //
 //  Bedienung
 //    →          ein Schritt des Agenten (Phase für Phase)
 //    Leertaste  Start / Stopp
-//    ← →        halten: Wagen selbst schieben (Modus "Selbst steuern")
-//    Klick in die Umgebung: Stab anstupsen
+//    Selbst steuern: ← → (Wagen) bzw. Zifferntasten 1–4
+//
+//  Ein Szenario ist ein Objekt mit festen Bestandteilen (siehe szenarien/wagen.js):
+//    id, name, titel, umgebungTitel, umgebungKurz, regelText
+//    optionen, einstellung, vorgaben {alpha, gamma, episoden}, dt
+//    aktionen(), anzahl(), zuruecksetzen(), zustand(), einordnen(z), schritt(a)
+//    episodenWert(), episodenErgebnis(), kurve {titel, min, max, ticks, einheit, leer}
+//    zeichneUmgebung(ansicht), qZelle(s), zeichneQAchsen(), zustandsZeilen(s)
+//    texte {…}, mensch, menschAktion(taste), klick(x, y), export
 //
 //  Läuft mit p5.js 1.x und 2.x.
 //  Hinweis: Alle Schleifen haben geschweifte Klammern – der p5-Web-Editor
@@ -62,22 +69,15 @@ function ladeSchriften() {
   }
 }
 
-const P_UMW = { x: 24, y: 84, w: 640, h: 400, titel: "Umgebung · Wagen mit Stab" };
-const P_KURVE = { x: 24, y: 500, w: 640, h: 160, titel: "Lernkurve · Schritte je Episode" };
+const P_UMW = { x: 24, y: 84, w: 640, h: 400, titel: "" };
+const P_KURVE = { x: 24, y: 500, w: 640, h: 160, titel: "" };
 const P_Q = { x: 680, y: 84, w: 896, h: 576, titel: "Q-Tabelle · Gedächtnis des Agenten" };
 const P_ERKL = { x: 24, y: 676, w: 820, h: 208, titel: "" };
 const P_EINST = { x: 860, y: 676, w: 716, h: 208, titel: "Einstellungen" };
 const KOPF_H = 34; // Höhe der Panel-Überschrift
-
-// Umgebung
 const MITTE_X = P_UMW.x + P_UMW.w / 2;
-const BODEN_Y = 422;
-const PX_M = 112; // Pixel je Meter auf der Bahn
-const STAB_PX = 140; // gezeichnete Stablänge (etwas länger als maßstäblich)
-const WAGEN_B = 64;
-const WAGEN_H = 30;
 
-// Q-Tabelle
+// Bereich, in dem die Szenarien ihre Q-Tabelle zeichnen
 const QT = { x: 790, y: 150, w: 740, h: 430 };
 
 // Lernkurve
@@ -99,10 +99,10 @@ const FARBE = {
   akzentHell: [228, 0, 43], // Logo-Rot (nur dekorativ / große Elemente)
   senf: [184, 122, 28],
   gruen: [52, 128, 84],
-  links: [44, 92, 150], // Aktion ← (blau)
-  rechts: [184, 122, 28], // Aktion → (Senf)
+  links: [44, 92, 150], // blau
+  rechts: [184, 122, 28], // Senf
+  dunkel: [72, 70, 66],
 };
-const AKTION_FARBE = [FARBE.links, FARBE.rechts];
 
 const ART_FARBE = {
   training: [200, 30, 58],
@@ -112,34 +112,42 @@ const ART_FARBE = {
 };
 const ART_NAME = { training: "Training", zufall: "Zufall", vorfuehren: "Vorführen", mensch: "Selbst" };
 
-const GRUND_TEXT = {
-  umgefallen: "Stab umgefallen",
-  bahn: "Wagen aus der Bahn gefahren",
-  geschafft: "Geschafft – 10 Sekunden balanciert",
-};
+// -----------------------------------------------------------------------------
+// Szenarien (werden von den Dateien in szenarien/ eingetragen)
+// -----------------------------------------------------------------------------
+const SZENARIEN = {};
+const SZENARIO_LISTE = [];
+
+function szenarioRegistrieren(sz) {
+  SZENARIEN[sz.id] = sz;
+  SZENARIO_LISTE.push(sz.id);
+}
 
 // -----------------------------------------------------------------------------
 // Zustand
 // -----------------------------------------------------------------------------
-let env;
+let sz; // das aktive Szenario
 let agent;
+const gespeichert = {}; // je Szenario: Agent und Lernkurve (bleiben beim Wechseln erhalten)
 
 let modus = "training"; // mensch | zufall | training | vorfuehren
 let laeuft = false; // läuft gerade automatisch?
 let phase = "bereit"; // bereit | beobachten | waehlen | ausfuehren | lernen | ende
 let sch = null; // der gerade betrachtete Schritt (alle Zwischenwerte)
-let letzteAktion = null; // für den Kraftpfeil am Wagen
+let zuletzt = null; // der zuletzt ausgeführte Schritt (für Animationen)
+let schrittZeit = 0; // Zeitpunkt des letzten Schritts (für Animationen)
+let letzteAktion = null;
+let menschTaste = null; // im Echtzeit-Selbststeuern: zuletzt gedrückte Ziffer
 let tempo = "Echtzeit";
 let episodenZiel = 300;
 let laufStart = 0; // Episodenzahl beim Start des Trainings
 let zeitKonto = 0; // für Echtzeit / Zeitlupe
 let pauseBis = 0; // kurze Pause nach dem Ende einer Episode
-let kurve = []; // {schritte, grund, art}
-let blitz = null; // zuletzt geänderter Q-Wert {s, a, d, t0}
+let kurve = []; // {wert, gut, art}
+let blitz = null; // zuletzt geänderter Q-Wert {s, a, t0}
 let meldung = null; // {text, farbe, t0}
 let hinweis = null;
 let fehlerMeldung = null;
-let stupsAnzeige = null;
 let cnv;
 
 // =============================================================================
@@ -151,12 +159,23 @@ function setup() {
   cnv = createCanvas(cw, ch);
   S = width / W;
 
-  env = new WagenMitStab();
-  agent = new QAgent("einfach");
+  sz = SZENARIEN[SZENARIO_LISTE[0]];
+  agent = neuerAgent(sz);
+  episodenZiel = sz.vorgaben.episoden;
+  sz.zuruecksetzen();
 
   erstelleUi();
   cnv.parent(huelle);
   layoutUi();
+  uiAusSzenario();
+}
+
+function neuerAgent(s) {
+  const a = new QAgent(s.anzahl(), s.aktionen().length);
+  a.alpha = s.vorgaben.alpha;
+  a.gamma = s.vorgaben.gamma;
+  a.epsilonFaktor = s.vorgaben.epsFaktor || 0.97;
+  return a;
 }
 
 function zeichenflaeche() {
@@ -204,16 +223,63 @@ function behandleFehler(err) {
 }
 
 // =============================================================================
+// Szenario wechseln
+// =============================================================================
+function szenarioWechseln(id) {
+  if (!SZENARIEN[id] || (sz && id === sz.id)) {
+    return;
+  }
+  gespeichert[sz.id] = { agent, kurve, episodenZiel };
+  sz = SZENARIEN[id];
+  if (gespeichert[id]) {
+    agent = gespeichert[id].agent;
+    kurve = gespeichert[id].kurve;
+    episodenZiel = gespeichert[id].episodenZiel;
+  } else {
+    agent = neuerAgent(sz);
+    kurve = [];
+    episodenZiel = sz.vorgaben.episoden;
+  }
+  modus = "training";
+  allesZuruecksetzen();
+  uiAusSzenario();
+}
+
+// Eine Option (z. B. Zustand) ändern. Ändert sie die Tabelle, wird neu begonnen.
+function optionAendern(i, wert) {
+  const o = sz.optionen[i];
+  if (sz.einstellung[o.key] === wert) {
+    return;
+  }
+  if (o.neuAufbau) {
+    if (agent.updates > 0 && !confirm("Achtung: Die Q-Tabelle wird neu angelegt, alles Gelernte geht verloren.")) {
+      return;
+    }
+    sz.einstellung[o.key] = wert;
+    const alt = agent;
+    agent = neuerAgent(sz);
+    agent.alpha = alt.alpha;
+    agent.gamma = alt.gamma;
+    kurve = [];
+  } else {
+    sz.einstellung[o.key] = wert;
+  }
+  allesZuruecksetzen();
+}
+
+// =============================================================================
 // Ablauf
 // =============================================================================
 function allesZuruecksetzen() {
   laeuft = false;
   phase = "bereit";
   sch = null;
+  zuletzt = null;
   blitz = null;
   meldung = null;
   letzteAktion = null;
-  env.zuruecksetzen();
+  menschTaste = null;
+  sz.zuruecksetzen();
   if (ui.eps) {
     uiAusAgent();
   }
@@ -231,17 +297,30 @@ function neuStarten() {
   if (!confirm("Q-Tabelle leeren? Alles Gelernte und die Lernkurve gehen verloren.")) {
     return;
   }
-  agent.neuAufbauen(agent.art);
+  agent.neuAufbauen(sz.anzahl(), sz.aktionen().length);
   agent.epsilon = 1;
   kurve = [];
   allesZuruecksetzen();
 }
 
+function menschDiskret() {
+  return modus === "mensch" && sz.mensch === "diskret";
+}
+
 function aktionsKnopf() {
+  if (menschDiskret()) {
+    // Selbst entscheiden: neu beginnen
+    sz.zuruecksetzen();
+    sch = null;
+    zuletzt = null;
+    meldung = null;
+    phase = "bereit";
+    return;
+  }
   if (laeuft) {
     laeuft = false;
     if (modus === "mensch") {
-      env.zuruecksetzen();
+      sz.zuruecksetzen();
     }
     return;
   }
@@ -252,14 +331,14 @@ function starten() {
   if (modus === "training" && agent.epsilon < 0.02 && agent.episoden === 0) {
     zeigeHinweis("Hinweis: ε ist 0 – der Agent probiert nichts Neues aus.");
   }
-  if (phase !== "bereit" && phase !== "ende" && sch && !env.vorbei) {
-    // mitten in einer schrittweisen Episode einfach weitermachen
-  } else {
-    env.zuruecksetzen();
+  const mittendrin = phase !== "bereit" && phase !== "ende" && sch && !sch.vorbei;
+  if (!mittendrin) {
+    sz.zuruecksetzen();
   }
   phase = "bereit";
   sch = null;
   meldung = null;
+  menschTaste = null;
   laufStart = agent.episoden;
   zeitKonto = 0;
   pauseBis = 0;
@@ -270,14 +349,18 @@ function zeigeHinweis(text) {
   hinweis = { text, t0: millis() };
 }
 
+function tempoFaktor() {
+  return tempo === "Zeitlupe" ? 0.25 : 1;
+}
+
 // Wie viele Schritte pro Bild?  Zeitlupe/Echtzeit laufen nach der Uhr.
 function schritteProBild() {
   if (tempo === "Zeitlupe" || tempo === "Echtzeit" || modus === "mensch") {
-    const faktor = tempo === "Zeitlupe" ? 0.25 : 1;
+    const faktor = modus === "mensch" ? (tempo === "Zeitlupe" ? 0.25 : 1) : tempoFaktor();
     zeitKonto += (Math.min(deltaTime, 100) / 1000) * faktor;
     let n = 0;
-    while (zeitKonto >= PHYSIK.dt && n < 5) {
-      zeitKonto -= PHYSIK.dt;
+    while (zeitKonto >= sz.dt && n < 5) {
+      zeitKonto -= sz.dt;
       n++;
     }
     return n;
@@ -286,6 +369,16 @@ function schritteProBild() {
     return 10;
   }
   return Infinity; // Turbo: so viele, wie in 14 ms passen
+}
+
+// Fortschritt der Animation des letzten Schritts (0 … 1)
+function animation() {
+  const schnell = laeuft && modus !== "mensch" && (tempo === "schnell" || tempo === "Turbo");
+  if (schnell || !zuletzt) {
+    return 1;
+  }
+  const dauer = laeuft ? (sz.dt * 1000) / tempoFaktor() : 550;
+  return constrain((millis() - schrittZeit) / Math.max(dauer, 1), 0, 1);
 }
 
 function logik() {
@@ -298,21 +391,18 @@ function logik() {
 
   if (modus === "mensch") {
     const n = schritteProBild();
-    for (let i = 0; i < n && !env.vorbei; i++) {
-      let richtung = 0;
-      if (keyIsDown(LEFT_ARROW)) {
-        richtung -= 1;
+    for (let i = 0; i < n; i++) {
+      const a = sz.menschAktion(menschTaste);
+      menschTaste = null;
+      letzteAktion = a >= 0 ? a : null;
+      const st = sz.schritt(a);
+      zuletzt = { wahl: { a }, info: st.info, r: st.r, z2: st.z2 };
+      schrittZeit = millis();
+      if (st.vorbei) {
+        episodeAbschliessen();
+        laeuft = false;
+        break;
       }
-      if (keyIsDown(RIGHT_ARROW)) {
-        richtung += 1;
-      }
-      letzteAktion = richtung === 0 ? null : richtung > 0 ? 1 : 0;
-      env.schritt(richtung);
-      env.summe += 1;
-    }
-    if (env.vorbei) {
-      episodeAbschliessen();
-      laeuft = false;
     }
     return;
   }
@@ -333,7 +423,7 @@ function logik() {
         phase = "bereit";
         return;
       }
-      env.zuruecksetzen();
+      sz.zuruecksetzen();
       if (tempo === "Zeitlupe" || tempo === "Echtzeit") {
         // Endzustand noch kurz zeigen
         pauseBis = millis() + 700;
@@ -346,7 +436,7 @@ function logik() {
 
 // Ein kompletter Schritt: beobachten → wählen → ausführen → (lernen)
 function agentSchritt() {
-  const s = { z: env.zustand() };
+  const s = { z: sz.zustand() };
   beobachten(s);
   waehlen(s);
   ausfuehren(s);
@@ -357,7 +447,7 @@ function agentSchritt() {
 }
 
 function beobachten(s) {
-  const e = agent.einordnen(s.z);
+  const e = sz.einordnen(s.z);
   s.f = e.f;
   s.s = e.s;
   s.q = agent.q[s.s].slice();
@@ -365,7 +455,7 @@ function beobachten(s) {
 
 function waehlen(s) {
   if (modus === "zufall") {
-    s.wahl = { a: Math.random() < 0.5 ? 0 : 1, zufall: null, erkunden: true };
+    s.wahl = { a: Math.floor(Math.random() * agent.nA), zufall: null, erkunden: true };
   } else if (modus === "vorfuehren") {
     s.wahl = { a: agent.besteAktion(s.s), zufall: null, erkunden: false };
   } else {
@@ -376,32 +466,34 @@ function waehlen(s) {
 }
 
 function ausfuehren(s) {
-  const st = env.schritt(s.wahl.a === 1 ? 1 : -1);
-  s.z2 = st.zustand;
-  s.gescheitert = st.gescheitert;
+  const st = sz.schritt(s.wahl.a);
+  s.z2 = st.z2;
+  s.r = st.r;
+  s.terminal = st.terminal;
   s.vorbei = st.vorbei;
-  s.r = agent.belohnung(st.gescheitert);
-  env.summe += s.r;
-  const e = agent.einordnen(s.z2);
+  s.info = st.info || {};
+  const e = sz.einordnen(s.z2);
   s.f2 = e.f;
   s.s2 = e.s;
+  zuletzt = s;
+  schrittZeit = millis();
 }
 
 function lernen(s) {
-  s.upd = agent.lernen(s.s, s.wahl.a, s.r, s.s2, s.gescheitert);
-  blitz = { s: s.s, a: s.wahl.a, d: s.upd.neu - s.upd.alt, t0: millis() };
+  s.upd = agent.lernen(s.s, s.wahl.a, s.r, s.s2, s.terminal);
+  blitz = { s: s.s, a: s.wahl.a, t0: millis() };
 }
 
 function episodeAbschliessen() {
-  kurve.push({ schritte: env.schritte, grund: env.grund, art: modus });
+  const erg = sz.episodenErgebnis();
+  kurve.push({ wert: sz.episodenWert(), gut: erg.gut, art: modus, grund: erg.grund, extra: erg.extra });
   if (kurve.length > 5000) {
     kurve.shift();
   }
   if (modus === "training") {
     agent.episodeBeendet(ui.epsAb.checked());
   }
-  const farbe = env.grund === "geschafft" ? FARBE.gruen : FARBE.akzent;
-  meldung = { text: `${GRUND_TEXT[env.grund]} · ${env.schritte} Schritte`, farbe, t0: millis(), grund: env.grund };
+  meldung = { text: erg.text, farbe: erg.gut ? FARBE.gruen : FARBE.akzent, t0: millis() };
 }
 
 // --- schrittweise mit → -------------------------------------------------------
@@ -411,11 +503,12 @@ function schrittVor() {
   }
   const einzeln = ui.phasen.checked();
 
-  if (phase === "ende" || (phase === "bereit" && env.vorbei)) {
-    env.zuruecksetzen();
+  if (phase === "ende") {
+    sz.zuruecksetzen();
     meldung = null;
     phase = "bereit";
     sch = null;
+    zuletzt = null;
     if (!einzeln) {
       return schrittVor();
     }
@@ -437,7 +530,7 @@ function schrittVor() {
       phase = "ende";
       return;
     }
-    sch = { z: env.zustand() };
+    sch = { z: sz.zustand() };
     beobachten(sch);
     phase = "beobachten";
   } else if (phase === "beobachten") {
@@ -452,8 +545,30 @@ function schrittVor() {
   }
 }
 
+// --- Selbst entscheiden (diskrete Aufgaben): ein Tastendruck = ein Schritt ---
+function menschSchritt(a) {
+  if (!menschDiskret() || a < 0 || a >= agent.nA) {
+    return;
+  }
+  if (phase === "ende") {
+    sz.zuruecksetzen();
+    meldung = null;
+  }
+  const s = { z: sz.zustand() };
+  beobachten(s);
+  s.wahl = { a, zufall: null, erkunden: false };
+  letzteAktion = a;
+  ausfuehren(s);
+  sch = s;
+  phase = "ausfuehren";
+  if (s.vorbei) {
+    episodeAbschliessen();
+    phase = "ende";
+  }
+}
+
 // =============================================================================
-// Zeichnen – Grundlagen
+// Zeichnen – Grundlagen (auch von den Szenarien benutzt)
 // =============================================================================
 function mausX() {
   return mouseX / S;
@@ -496,16 +611,12 @@ function vz(v, stellen) {
   return (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(stellen);
 }
 
-function grad(rad) {
-  return vz((rad * 180) / Math.PI, 1) + "°";
-}
-
-function gradS(rad) {
-  return vz((rad * 180) / Math.PI, 0) + " °/s";
-}
-
 function klammer(v) {
   return v < 0 ? "(" + v.toFixed(2) + ")" : v.toFixed(2);
+}
+
+function zahl(v, stellen) {
+  return v.toFixed(stellen).replace("-", "−");
 }
 
 function umbrechen(txt, maxBreite) {
@@ -531,29 +642,26 @@ function gestrichelt(an) {
   drawingContext.setLineDash(an ? [5, 4] : []);
 }
 
-// Fachgrenzen als lesbarer Text, z. B. "0° … +4°"
-function fachText(groesse, i) {
-  const n = agent.faecher[groesse];
-  if (n <= 1) {
-    return "–";
-  }
-  const g = agent.grenzen(groesse);
-  const fmt = (v) => {
-    if (groesse === "theta") {
-      return grad(v).replace(".0°", "°");
-    }
-    if (groesse === "omega") {
-      return gradS(v);
-    }
-    return vz(v, 1) + (groesse === "x" ? " m" : " m/s");
-  };
-  if (i === 0) {
-    return "unter " + fmt(g[0]);
-  }
-  if (i === n - 1) {
-    return "über " + fmt(g[n - 2]);
-  }
-  return fmt(g[i - 1]) + " … " + fmt(g[i]);
+// sanfte Bewegung für Animationen
+function weich(t) {
+  return t * t * (3 - 2 * t);
+}
+
+// Schriftzug mit Hintergrund (für Meldungen in der Umgebung)
+function plakette(txt, x, y, farbe) {
+  textFont(TITEL);
+  textStyle(BOLD);
+  textSize(19);
+  textAlign(CENTER, CENTER);
+  const b = textWidth(txt) + 36;
+  fill(255, 235);
+  stroke(...farbe);
+  strokeWeight(1.5);
+  rect(x - b / 2, y - 16, b, 32, 16);
+  noStroke();
+  fill(...farbe);
+  text(txt, x, y);
+  textStyle(NORMAL);
 }
 
 // =============================================================================
@@ -579,16 +687,13 @@ function zeichneKopf() {
   fill(...FARBE.text);
   textFont(TITEL);
   textStyle(BOLD);
-  textSize(21);
+  textSize(20);
   textAlign(LEFT, CENTER);
-  text("KI balanciert", 194, 21);
+  text(sz.titel, 194, 17);
   textStyle(NORMAL);
-  textFont(SCHRIFT);
-  textSize(13);
-  fill(...FARBE.blass);
-  text("Reinforcement Learning · Q-Learning", 194, 41);
 
   fill(...FARBE.grau);
+  textFont(SCHRIFT);
   textSize(13);
   textAlign(LEFT, CENTER);
   text(statusText(), 26, 70);
@@ -597,10 +702,10 @@ function zeichneKopf() {
 function statusText() {
   const tab = `Q-Tabelle: ${agent.besuchteZustaende()} von ${agent.anzahl} Zuständen besucht · ${agent.episoden} Episoden gelernt`;
   if (modus === "mensch") {
-    return "Selbst steuern · ← und → gedrückt halten · Schaffst du 500 Schritte (10 Sekunden)?";
+    return sz.texte.menschStatus;
   }
   if (modus === "zufall") {
-    return "Zufallsagent · wirft bei jedem Schritt eine Münze · lernt nichts · " + tab;
+    return "Zufallsagent · wählt jede Aktion zufällig · lernt nichts · " + tab;
   }
   if (modus === "vorfuehren") {
     return "Vorführen · ε = 0, der Agent nutzt nur sein Wissen und lernt nicht dazu · " + tab;
@@ -613,226 +718,80 @@ function statusText() {
 }
 
 // =============================================================================
-// Umgebung: Bahn, Wagen, Stab
+// Umgebung – das Zeichnen übernimmt das Szenario
 // =============================================================================
 function zeichneUmgebung() {
   const p = P_UMW;
+  p.titel = sz.umgebungTitel;
   panel(p);
 
   // bei kurzer Pause nach dem Ende: den letzten Zustand zeigen
   const zeigeEnde = millis() < pauseBis && sch && sch.z2;
-  const z = zeigeEnde ? sch.z2 : env.zustand();
+  const ansicht = {
+    z: zeigeEnde ? sch.z2 : sz.zustand(),
+    zeigeEnde,
+    sch,
+    phase,
+    letzteAktion,
+    wahl: sch && phase === "waehlen" && sch.wahl ? sch.wahl.a : null,
+    zuletzt,
+    anim: animation(),
+    aktiv: laeuft || phase === "waehlen" || phase === "ausfuehren" || phase === "lernen",
+  };
+  sz.zeichneUmgebung(ansicht);
 
-  const wx = MITTE_X + z.x * PX_M;
-  const drehY = BODEN_Y - 8 - WAGEN_H;
-
-  // --- Bahn ---
-  const links = MITTE_X - PHYSIK.xMax * PX_M;
-  const rechts = MITTE_X + PHYSIK.xMax * PX_M;
-  stroke(...FARBE.linie);
-  strokeWeight(4);
-  line(p.x + 16, BODEN_Y, p.x + p.w - 16, BODEN_Y);
-  stroke(...FARBE.grau);
-  strokeWeight(2);
-  line(links, BODEN_Y, rechts, BODEN_Y);
-  // Bahnenden: dezent, rot nur wenn der Wagen sie überfahren hat
-  const ausBahn = Math.abs(z.x) > PHYSIK.xMax;
-  for (const sgn of [-1, 1]) {
-    const erreicht = ausBahn && Math.sign(z.x) === sgn;
-    stroke(...(erreicht ? FARBE.akzent : FARBE.blass));
-    strokeWeight(erreicht ? 3 : 1.5);
-    const ex = sgn < 0 ? links : rechts;
-    line(ex, BODEN_Y - (erreicht ? 14 : 8), ex, BODEN_Y + 4);
-  }
-
-  // Fächer der Position (nur wenn der Agent sie sieht)
-  noStroke();
-  textFont(SCHRIFT);
-  textSize(11);
-  fill(...FARBE.blass);
-  textAlign(CENTER, TOP);
-  text("−2,4 m", links, BODEN_Y + 10);
-  text("0", MITTE_X, BODEN_Y + 10);
-  text("+2,4 m", rechts, BODEN_Y + 10);
-  if (agent.faecher.x > 1) {
-    stroke(...FARBE.blass);
-    strokeWeight(1);
-    gestrichelt(true);
-    for (const g of agent.grenzen("x")) {
-      line(MITTE_X + g * PX_M, BODEN_Y - 10, MITTE_X + g * PX_M, BODEN_Y + 26);
-    }
-    gestrichelt(false);
-    noStroke();
-    const fx = agent.fach(z.x, "x");
-    const namen = ["links", "Mitte", "rechts"];
-    for (let i = 0; i < 3; i++) {
-      fill(...(i === fx ? FARBE.akzent : FARBE.blass));
-      textStyle(i === fx ? BOLD : NORMAL);
-      text(namen[i], MITTE_X + (i - 1) * 1.6 * PX_M, BODEN_Y + 26);
-    }
-    textStyle(NORMAL);
-  } else {
-    noStroke();
-    fill(...FARBE.blass);
-    text("Der Agent sieht die Wagenposition nicht", MITTE_X, BODEN_Y + 28);
-  }
-
-  // --- Winkelfächer hinter dem Stab: so "sieht" der Agent den Winkel ---
-  const n = agent.faecher.theta;
-  const ft = agent.fach(z.theta, "theta");
-  const rF = STAB_PX + 18;
-  for (let i = 0; i < n; i++) {
-    const a1 = -PHYSIK.thetaMax + (2 * PHYSIK.thetaMax * i) / n;
-    const a2 = -PHYSIK.thetaMax + (2 * PHYSIK.thetaMax * (i + 1)) / n;
-    noStroke();
-    if (i === ft) {
-      fill(...FARBE.akzent, 34);
-    } else {
-      fill(...FARBE.flaeche2, i % 2 === 0 ? 150 : 90);
-    }
-    arc(wx, drehY, 2 * rF, 2 * rF, -HALF_PI + a1, -HALF_PI + a2, PIE);
-  }
-  // Grenze ±12°: nur einblenden, wenn der Stab sie überschritten hat
-  if (Math.abs(z.theta) > PHYSIK.thetaMax) {
-    const sgn = Math.sign(z.theta);
-    const a = sgn * PHYSIK.thetaMax;
-    stroke(...FARBE.akzent);
-    strokeWeight(1.5);
-    gestrichelt(true);
-    line(wx, drehY, wx + Math.sin(a) * (rF + 8), drehY - Math.cos(a) * (rF + 8));
-    gestrichelt(false);
-    noStroke();
-    fill(...FARBE.akzent);
-    textSize(11);
-    textAlign(CENTER, BOTTOM);
-    text(sgn < 0 ? "−12°" : "+12°", wx + Math.sin(a) * (rF + 14), drehY - Math.cos(a) * (rF + 12));
-  }
-
-  // --- Wagen ---
-  const umgefallen = env.vorbei || zeigeEnde;
-  noStroke();
-  fill(...FARBE.text);
-  rect(wx - WAGEN_B / 2, drehY, WAGEN_B, WAGEN_H, 6);
-  fill(...FARBE.grau);
-  circle(wx - WAGEN_B / 2 + 14, BODEN_Y - 6, 13);
-  circle(wx + WAGEN_B / 2 - 14, BODEN_Y - 6, 13);
-  fill(...FARBE.flaeche);
-  circle(wx - WAGEN_B / 2 + 14, BODEN_Y - 6, 4);
-  circle(wx + WAGEN_B / 2 - 14, BODEN_Y - 6, 4);
-
-  // Kraftpfeil
-  if (letzteAktion !== null && (laeuft || phase === "ausfuehren" || phase === "lernen" || phase === "waehlen")) {
-    const r = letzteAktion === 1 ? 1 : -1;
-    const fx0 = wx - r * (WAGEN_B / 2 + 6);
-    const fx1 = fx0 - r * 34;
-    stroke(...AKTION_FARBE[letzteAktion]);
-    strokeWeight(4);
-    line(fx1, drehY + WAGEN_H / 2, fx0 - r * 8, drehY + WAGEN_H / 2);
-    noStroke();
-    fill(...AKTION_FARBE[letzteAktion]);
-    triangle(fx0, drehY + WAGEN_H / 2, fx0 - r * 12, drehY + WAGEN_H / 2 - 8, fx0 - r * 12, drehY + WAGEN_H / 2 + 8);
-  }
-
-  // --- Stab ---
-  const sx = wx + Math.sin(z.theta) * STAB_PX;
-  const sy = drehY - Math.cos(z.theta) * STAB_PX;
-  stroke(...(umgefallen && (zeigeEnde ? sch.gescheitert : env.grund !== "geschafft") ? FARBE.akzent : FARBE.senf));
-  strokeWeight(9);
-  strokeCap(ROUND);
-  line(wx, drehY, sx, sy);
-  noStroke();
-  fill(...FARBE.flaeche);
-  circle(wx, drehY, 8);
-
-  // Drehgeschwindigkeit als gebogener Pfeil an der Stabspitze
-  if (Math.abs(z.omega) > 0.02) {
-    const laenge = constrain(z.omega, -2, 2) * 0.35;
-    const r = STAB_PX + 2;
-    const a0 = -HALF_PI + z.theta;
-    const a1 = a0 + laenge;
-    stroke(...FARBE.text);
-    strokeWeight(2);
-    noFill();
-    arc(wx, drehY, 2 * r, 2 * r, Math.min(a0, a1), Math.max(a0, a1));
-    const ex = wx + Math.cos(a1) * r;
-    const ey = drehY + Math.sin(a1) * r;
-    const t = a1 + (laenge > 0 ? HALF_PI : -HALF_PI);
-    noStroke();
-    fill(...FARBE.text);
-    push();
-    translate(ex, ey);
-    rotate(t);
-    triangle(4, 0, -5, -5, -5, 5);
-    pop();
-  }
-
-  // --- Messwerte ---
-  noStroke();
-  textFont(MONO);
-  textSize(13);
-  textAlign(LEFT, TOP);
-  fill(...FARBE.text);
-  text(`x = ${vz(z.x, 2)} m   v = ${vz(z.v, 2)} m/s   θ = ${grad(z.theta)}   ω = ${gradS(z.omega)}`, p.x + 16, p.y + 46);
-  textFont(SCHRIFT);
-  textSize(12);
-  fill(...FARBE.grau);
-  const e = agent.einordnen(z);
-  text(`Agent sieht: Zustand s = ${e.s} (Zeile der Q-Tabelle)`, p.x + 16, p.y + 68);
-  textAlign(RIGHT, TOP);
-  const schritte = zeigeEnde && kurve.length ? kurve[kurve.length - 1].schritte : env.schritte;
-  text(`Schritt ${schritte} von ${PHYSIK.maxSchritte}`, p.x + p.w - 16, p.y + 68);
-
-  // --- Meldung (umgefallen, geschafft …) ---
+  // --- Meldung (Episode vorbei) ---
   const schnellLauf = laeuft && (tempo === "schnell" || tempo === "Turbo") && modus !== "mensch";
   if (meldung && !schnellLauf && (millis() - meldung.t0 < 2500 || !laeuft)) {
-    textFont(TITEL);
-    textStyle(BOLD);
-    textSize(19);
-    textAlign(CENTER, CENTER);
-    const b = textWidth(meldung.text) + 36;
-    fill(255, 235);
-    stroke(...meldung.farbe);
-    strokeWeight(1.5);
-    rect(MITTE_X - b / 2, p.y + 90, b, 32, 16);
+    plakette(meldung.text, MITTE_X, p.y + (sz.meldungY || 106), meldung.farbe);
+  } else if (modus === "mensch" && !laeuft && sz.mensch === "echtzeit") {
     noStroke();
-    fill(...meldung.farbe);
-    text(meldung.text, MITTE_X, p.y + 106);
-    textStyle(NORMAL);
-  } else if (modus === "mensch" && !laeuft) {
     textFont(SCHRIFT);
     textSize(14);
     textAlign(CENTER, CENTER);
     fill(...FARBE.grau);
-    text("Leertaste oder ← / → drücken, um zu starten", MITTE_X, p.y + 106);
+    text(sz.texte.menschStart, MITTE_X, p.y + (sz.meldungY || 106));
   }
 
-  // Stups-Anzeige
-  if (stupsAnzeige && millis() - stupsAnzeige.t0 < 600) {
-    const a = 255 * (1 - (millis() - stupsAnzeige.t0) / 600);
-    noFill();
-    stroke(...FARBE.akzent, a);
-    strokeWeight(2);
-    circle(stupsAnzeige.x, stupsAnzeige.y, 20 + (millis() - stupsAnzeige.t0) / 12);
+  // unterste Zeile: Regeln oder (Selbst entscheiden) Aktions-Knöpfe
+  if (menschDiskret()) {
+    zeichneMenschKnoepfe();
+  } else {
+    noStroke();
+    textFont(SCHRIFT);
+    textSize(12);
+    textAlign(CENTER, BOTTOM);
+    fill(...FARBE.grau);
+    text(sz.regelText, MITTE_X, p.y + p.h - 7);
   }
+}
 
-  // Spielregeln
-  noStroke();
-  textFont(SCHRIFT);
-  textSize(12);
-  textAlign(CENTER, BOTTOM);
-  fill(...FARBE.grau);
-  text(
-    "Abbruch: Stab kippt mehr als 12° · Wagen verlässt die Bahn (±2,4 m)   ·   Ziel: 500 Schritte (10 s)",
-    MITTE_X,
-    p.y + p.h - 7
-  );
+// Knöpfe für "Selbst steuern" bei Aufgaben, die Schritt für Schritt gehen
+function menschKnopfFlaechen() {
+  const p = P_UMW;
+  const akt = sz.aktionen();
+  const luecke = 8;
+  const b = (p.w - 32 - luecke * (akt.length - 1)) / akt.length;
+  return akt.map((a, i) => ({ x: p.x + 16 + i * (b + luecke), y: p.y + p.h - 38, w: b, h: 30, a: i }));
+}
 
-  noStroke();
-  fill(...FARBE.blass);
-  textFont(SCHRIFT);
-  textSize(12);
-  textAlign(RIGHT, CENTER);
-  text("Klick neben den Stab: anstupsen", p.x + p.w - 16, p.y + KOPF_H / 2 + 1);
+function zeichneMenschKnoepfe() {
+  const akt = sz.aktionen();
+  for (const k of menschKnopfFlaechen()) {
+    const ueber = mausX() >= k.x && mausX() <= k.x + k.w && mausY() >= k.y && mausY() <= k.y + k.h;
+    stroke(...akt[k.a].farbe);
+    strokeWeight(1.5);
+    fill(...akt[k.a].farbe, ueber ? 60 : 25);
+    rect(k.x, k.y, k.w, k.h, 15);
+    noStroke();
+    fill(...FARBE.text);
+    textFont(SCHRIFT);
+    textStyle(BOLD);
+    textSize(13);
+    textAlign(CENTER, CENTER);
+    text(`${k.a + 1} · ${akt[k.a].text}`, k.x + k.w / 2, k.y + k.h / 2);
+    textStyle(NORMAL);
+  }
 }
 
 // =============================================================================
@@ -840,6 +799,8 @@ function zeichneUmgebung() {
 // =============================================================================
 function zeichneKurve() {
   const p = P_KURVE;
+  const kv = sz.kurve;
+  p.titel = kv.titel;
   panel(p);
 
   // Legende in der Kopfzeile
@@ -868,18 +829,18 @@ function zeichneKurve() {
 
   // Achsen
   const k = KV;
+  const yWert = (v) => k.y + k.h - ((constrain(v, kv.min, kv.max) - kv.min) / (kv.max - kv.min)) * k.h;
   stroke(...FARBE.linie);
   strokeWeight(1);
-  for (const v of [0, 250, 500]) {
-    const y = k.y + k.h - (v / 500) * k.h;
-    line(k.x, y, k.x + k.w, y);
+  for (const v of kv.ticks) {
+    line(k.x, yWert(v), k.x + k.w, yWert(v));
   }
   noStroke();
   fill(...FARBE.blass);
   textSize(11);
   textAlign(RIGHT, CENTER);
-  for (const v of [0, 250, 500]) {
-    text(String(v), k.x - 6, k.y + k.h - (v / 500) * k.h);
+  for (const v of kv.ticks) {
+    text(String(v).replace("-", "−"), k.x - 6, yWert(v));
   }
   textAlign(LEFT, TOP);
   text("Episode →", k.x, k.y + k.h + 4);
@@ -888,7 +849,7 @@ function zeichneKurve() {
     textAlign(CENTER, CENTER);
     textSize(13);
     fill(...FARBE.grau);
-    text("Noch keine Episode. Jede Episode endet, wenn der Stab umfällt.", k.x + k.w / 2, k.y + k.h / 2 - 8);
+    text(kv.leer, k.x + k.w / 2, k.y + k.h / 2 - 8);
     return;
   }
 
@@ -899,7 +860,7 @@ function zeichneKurve() {
   for (let i = 0; i < kurve.length; i++) {
     const e = kurve[i];
     fill(...ART_FARBE[e.art], e.art === "training" ? 110 : 190);
-    circle(k.x + (i + 0.5) * dx, k.y + k.h - (e.schritte / 500) * k.h, r * 2);
+    circle(k.x + (i + 0.5) * dx, yWert(e.wert), r * 2);
   }
 
   // gleitender Mittelwert über 20 Trainings-Episoden
@@ -913,12 +874,12 @@ function zeichneKurve() {
     if (kurve[i].art !== "training") {
       continue;
     }
-    fenster.push(kurve[i].schritte);
-    summe += kurve[i].schritte;
+    fenster.push(kurve[i].wert);
+    summe += kurve[i].wert;
     if (fenster.length > 20) {
       summe -= fenster.shift();
     }
-    vertex(k.x + (i + 0.5) * dx, k.y + k.h - (summe / fenster.length / 500) * k.h);
+    vertex(k.x + (i + 0.5) * dx, yWert(summe / fenster.length));
   }
   endShape();
 
@@ -927,93 +888,101 @@ function zeichneKurve() {
   fill(...FARBE.grau);
   textSize(11);
   textAlign(RIGHT, TOP);
-  text(`${kurve.length} Episoden · letzte: ${letzte.schritte} Schritte · Linie: Mittel der letzten 20 Trainings-Episoden`, k.x + k.w, k.y + k.h + 4);
+  text(
+    `${kurve.length} Episoden · letzte: ${kv.format(letzte.wert)} · Linie: Mittel der letzten 20 Trainings-Episoden`,
+    k.x + k.w,
+    k.y + k.h + 4
+  );
 }
 
 // =============================================================================
-// Q-Tabelle
+// Q-Tabelle – Lage der Zellen und Beschriftung kommen vom Szenario
 // =============================================================================
-// Teilt die Q-Tabelle in Kacheln: je Kombination aus Wagenposition und
-// -geschwindigkeit eine Tabelle Winkel × Drehgeschwindigkeit.
-function qGeometrie() {
-  const F = agent.faecher;
-  const lueckeX = F.x > 1 ? 18 : 0;
-  const lueckeY = F.v > 1 ? 18 : 0;
-  const kopfX = F.x > 1 ? 18 : 0; // Platz für Überschriften der Kacheln
-  const kw = (QT.w - lueckeX * (F.x - 1)) / F.x;
-  const kh = (QT.h - kopfX - (lueckeY + kopfX) * (F.v - 1)) / F.v;
-  return { F, lueckeX, lueckeY, kopfX, kw, kh, zw: kw / F.theta, zh: kh / F.omega };
+function besteVon(q) {
+  let best = 0;
+  for (let a = 1; a < q.length; a++) {
+    if (q[a] > q[best]) {
+      best = a;
+    }
+  }
+  // Gleichstand an der Spitze → keine eindeutig bessere Aktion
+  for (let a = 0; a < q.length; a++) {
+    if (a !== best && q[a] === q[best]) {
+      return -1;
+    }
+  }
+  return best;
 }
 
-// linke obere Ecke der Zelle (Fächer f) im Bild
-function zelle(f) {
-  const g = qGeometrie();
-  const kx = QT.x + f.x * (g.kw + g.lueckeX);
-  // positive Geschwindigkeit oben
-  const vr = g.F.v - 1 - f.v;
-  const ky = QT.y + g.kopfX + vr * (g.kh + g.lueckeY + g.kopfX);
-  // positive Drehgeschwindigkeit oben
-  const or = g.F.omega - 1 - f.omega;
-  return { x: kx + f.theta * g.zw, y: ky + or * g.zh, w: g.zw, h: g.zh, kx, ky, g };
+function vorsprung(q) {
+  const sortiert = q.slice().sort((a, b) => b - a);
+  return sortiert[0] - sortiert[1];
 }
 
-function faecherAus(s) {
-  const F = agent.faecher;
-  let r = s;
-  const omega = r % F.omega;
-  r = Math.floor(r / F.omega);
-  const theta = r % F.theta;
-  r = Math.floor(r / F.theta);
-  const v = r % F.v;
-  const x = Math.floor(r / F.v);
-  return { x, v, theta, omega };
+function zahlenPassen(c, nA) {
+  return c.w / nA >= (nA === 2 ? 40 : 38) && c.h >= 15;
 }
 
 function zeichneQTabelle() {
   const p = P_Q;
   panel(p);
-  const g = qGeometrie();
-  const F = g.F;
-  const gross = g.zw > 80;
+  const akt = sz.aktionen();
+  const nA = agent.nA;
+  const stellen = sz.qStellen === undefined ? 1 : sz.qStellen;
 
   // Maßstab für die Farbstärke
   let maxDiff = 0.001;
   for (const q of agent.q) {
-    maxDiff = Math.max(maxDiff, Math.abs(q[1] - q[0]));
+    maxDiff = Math.max(maxDiff, vorsprung(q));
   }
 
   textFont(SCHRIFT);
   for (let s = 0; s < agent.anzahl; s++) {
-    const f = faecherAus(s);
-    const c = zelle(f);
+    const c = sz.qZelle(s);
+    if (!c) {
+      continue;
+    }
     const q = agent.q[s];
     const besucht = agent.besuche[s] > 0;
     stroke(...FARBE.linie);
     strokeWeight(1);
-    if (!besucht && q[0] === 0 && q[1] === 0) {
+    if (!besucht && q.every((v) => v === 0)) {
       fill(...FARBE.papier);
       rect(c.x, c.y, c.w, c.h);
       continue;
     }
-    const besser = q[1] > q[0] ? 1 : q[0] > q[1] ? 0 : -1;
+    const besser = besteVon(q);
     if (besser < 0) {
       fill(...FARBE.flaeche);
     } else {
-      const a = 40 + 170 * Math.sqrt(Math.abs(q[1] - q[0]) / maxDiff);
-      fill(...AKTION_FARBE[besser], a);
+      const a = 40 + 170 * Math.sqrt(vorsprung(q) / maxDiff);
+      fill(...akt[besser].farbe, a);
     }
     rect(c.x, c.y, c.w, c.h);
 
     noStroke();
-    if (gross) {
+    if (zahlenPassen(c, nA)) {
       textFont(MONO);
-      textSize(12);
-      for (let a = 0; a < 2; a++) {
+      textSize(Math.min(12, c.h * 0.62));
+      const tw = c.w / nA;
+      for (let a = 0; a < nA; a++) {
         fill(...FARBE.text);
         textStyle(a === besser ? BOLD : NORMAL);
-        textAlign(a === 0 ? LEFT : RIGHT, CENTER);
-        const tx = a === 0 ? c.x + 6 : c.x + c.w - 6;
-        text((a === 0 ? "←" : "") + q[a].toFixed(1) + (a === 1 ? "→" : ""), tx, c.y + c.h / 2);
+        if (nA === 2) {
+          textAlign(a === 0 ? LEFT : RIGHT, CENTER);
+          const tx = a === 0 ? c.x + 6 : c.x + c.w - 6;
+          const zusatz = sz.qPfeile ? [akt[0].kurz, akt[1].kurz] : ["", ""];
+          text((a === 0 ? zusatz[0] : "") + zahl(q[a], stellen) + (a === 1 ? zusatz[1] : ""), tx, c.y + c.h / 2);
+        } else {
+          textAlign(CENTER, CENTER);
+          text(zahl(q[a], stellen), c.x + (a + 0.5) * tw, c.y + c.h / 2);
+          if (a > 0) {
+            stroke(255, 120);
+            strokeWeight(1);
+            line(c.x + a * tw, c.y + 3, c.x + a * tw, c.y + c.h - 3);
+            noStroke();
+          }
+        }
       }
       textStyle(NORMAL);
     } else if (besser >= 0 && c.w > 14) {
@@ -1021,19 +990,29 @@ function zeichneQTabelle() {
       textFont(SCHRIFT);
       textSize(Math.min(12, c.h * 0.8));
       textAlign(CENTER, CENTER);
-      text(AKTION_NAME[besser], c.x + c.w / 2, c.y + c.h / 2);
+      text(akt[besser].kurz, c.x + c.w / 2, c.y + c.h / 2);
     }
   }
 
+  // Teilfläche einer Aktion in einer Zelle (für Markierungen)
+  const teil = (c, a) => {
+    if (!zahlenPassen(c, nA)) {
+      return { x: c.x, y: c.y, w: c.w, h: c.h };
+    }
+    return { x: c.x + (a * c.w) / nA, y: c.y, w: c.w / nA, h: c.h };
+  };
+
   // gerade geänderter Q-Wert blitzt auf
   if (blitz && millis() - blitz.t0 < 900 && blitz.s < agent.anzahl) {
-    const c = zelle(faecherAus(blitz.s));
-    const a = 255 * (1 - (millis() - blitz.t0) / 900);
-    noFill();
-    stroke(...FARBE.akzentHell, a);
-    strokeWeight(3);
-    const hx = gross ? (blitz.a === 0 ? c.x : c.x + c.w / 2) : c.x;
-    rect(hx, c.y, gross ? c.w / 2 : c.w, c.h);
+    const c = sz.qZelle(blitz.s);
+    if (c) {
+      const t = teil(c, blitz.a);
+      const a = 255 * (1 - (millis() - blitz.t0) / 900);
+      noFill();
+      stroke(...FARBE.akzentHell, a);
+      strokeWeight(3);
+      rect(t.x, t.y, t.w, t.h);
+    }
   }
 
   // aktueller Zustand (rot) und – nach dem Ausführen – neuer Zustand (gestrichelt)
@@ -1045,93 +1024,53 @@ function zeichneQTabelle() {
       sNeu = sch.s2;
     }
   } else {
-    sJetzt = agent.einordnen(env.zustand()).s;
+    sJetzt = sz.einordnen(sz.zustand()).s;
   }
-  if (sNeu !== null && sNeu !== sJetzt) {
-    const c = zelle(faecherAus(sNeu));
-    noFill();
-    stroke(...FARBE.text);
-    strokeWeight(2.5);
-    gestrichelt(true);
-    rect(c.x - 1, c.y - 1, c.w + 2, c.h + 2);
-    gestrichelt(false);
+  if (sNeu !== null && sNeu !== sJetzt && !(sch && sch.terminal)) {
+    const c = sz.qZelle(sNeu);
+    if (c) {
+      noFill();
+      stroke(...FARBE.text);
+      strokeWeight(2.5);
+      gestrichelt(true);
+      rect(c.x - 1, c.y - 1, c.w + 2, c.h + 2);
+      gestrichelt(false);
+    }
   }
   if (sJetzt !== null) {
-    const c = zelle(faecherAus(sJetzt));
-    noFill();
-    stroke(...FARBE.akzent);
-    strokeWeight(3);
-    rect(c.x - 1, c.y - 1, c.w + 2, c.h + 2);
-    if (sch && phase === "waehlen" && gross && !laeuft) {
-      // gewählte Aktion markieren
-      const a = sch.wahl.a;
-      stroke(...AKTION_FARBE[a]);
+    const c = sz.qZelle(sJetzt);
+    if (c) {
+      noFill();
+      stroke(...FARBE.akzent);
       strokeWeight(3);
-      rect(a === 0 ? c.x + 3 : c.x + c.w / 2, c.y + 3, c.w / 2 - 3, c.h - 6, 3);
-    }
-  }
-
-  // --- Achsen ---
-  noStroke();
-  fill(...FARBE.grau);
-  textFont(SCHRIFT);
-  if (F.x === 1) {
-    // eine große Tabelle: Fachgrenzen beschriften
-    textSize(11);
-    textAlign(CENTER, TOP);
-    const gt = agent.grenzen("theta");
-    for (let i = 0; i < gt.length; i++) {
-      text(grad(gt[i]).replace(".0°", "°"), QT.x + (i + 1) * g.zw, QT.y + QT.h + 4);
-    }
-    textAlign(RIGHT, CENTER);
-    const go = agent.grenzen("omega");
-    for (let i = 0; i < go.length; i++) {
-      text(gradS(go[i]), QT.x - 6, QT.y + QT.h - (i + 1) * g.zh);
-    }
-    textSize(12);
-    fill(...FARBE.text);
-    textAlign(CENTER, TOP);
-    text("Winkel θ   ←  Stab neigt nach links  ·  nach rechts  →", QT.x + QT.w / 2, QT.y + QT.h + 20);
-    push();
-    translate(QT.x - 66, QT.y + QT.h / 2);
-    rotate(-HALF_PI);
-    textAlign(CENTER, BOTTOM);
-    text("Drehgeschwindigkeit ω   ←  kippt nach links  ·  nach rechts  →", 0, 0);
-    pop();
-  } else {
-    // Kacheln beschriften
-    const xn = ["Wagen links", "Wagen Mitte", "Wagen rechts"];
-    const vn = ["fährt nach rechts", "steht fast", "fährt nach links"];
-    textSize(11);
-    for (let ix = 0; ix < F.x; ix++) {
-      for (let iv = 0; iv < F.v; iv++) {
-        const c = zelle({ x: ix, v: F.v - 1 - iv, theta: 0, omega: F.omega - 1 });
-        fill(...FARBE.grau);
-        textAlign(LEFT, BOTTOM);
-        text(`${xn[ix]} · ${vn[iv]}`, c.kx, c.ky - 3);
+      rect(c.x - 1, c.y - 1, c.w + 2, c.h + 2);
+      if (sch && phase === "waehlen" && !laeuft && zahlenPassen(c, nA)) {
+        // gewählte Aktion markieren
+        const t = teil(c, sch.wahl.a);
+        stroke(...akt[sch.wahl.a].farbe);
+        strokeWeight(3);
+        rect(t.x + 3, t.y + 3, t.w - 6, t.h - 6, 3);
       }
     }
-    textSize(12);
-    fill(...FARBE.text);
-    textAlign(CENTER, TOP);
-    text("je Kachel: Winkel θ nach rechts  ·  Drehgeschwindigkeit ω nach oben", QT.x + QT.w / 2, QT.y + QT.h + 8);
   }
 
-  // Legende
+  // --- Achsen und Beschriftung (Szenario) ---
+  sz.zeichneQAchsen();
+
+  // Legende: Farben der Aktionen
   const ly = p.y + p.h - 22;
+  textFont(SCHRIFT);
   textSize(12);
   textAlign(LEFT, CENTER);
   let x = p.x + 18;
-  for (const [farbe, txt] of [
-    [FARBE.links, "← besser"],
-    [FARBE.rechts, "→ besser"],
-  ]) {
+  for (let a = 0; a < nA; a++) {
+    const txt = `${akt[a].kurz} besser`;
     noStroke();
-    fill(...farbe, 170);
+    fill(...akt[a].farbe, 170);
     rect(x, ly - 7, 22, 14, 3);
     fill(...FARBE.grau);
     text(txt, x + 28, ly);
-    x += 28 + textWidth(txt) + 18;
+    x += 28 + textWidth(txt) + 14;
   }
   fill(...FARBE.papier);
   stroke(...FARBE.linie);
@@ -1139,15 +1078,15 @@ function zeichneQTabelle() {
   noStroke();
   fill(...FARBE.grau);
   text("nie besucht", x + 28, ly);
-  x += 28 + textWidth("nie besucht") + 18;
+  x += 28 + textWidth("nie besucht") + 14;
   stroke(...FARBE.akzent);
   strokeWeight(3);
   noFill();
   rect(x, ly - 7, 22, 14);
   noStroke();
   fill(...FARBE.grau);
-  text("aktueller Zustand s", x + 28, ly);
-  x += 28 + textWidth("aktueller Zustand s") + 18;
+  text("Zustand s", x + 28, ly);
+  x += 28 + textWidth("Zustand s") + 14;
   stroke(...FARBE.text);
   strokeWeight(2);
   noFill();
@@ -1158,17 +1097,13 @@ function zeichneQTabelle() {
   fill(...FARBE.grau);
   text("neuer Zustand s'", x + 28, ly);
 
-  textAlign(RIGHT, CENTER);
-  fill(...FARBE.blass);
-  text(gross ? "Zahlen: Q(s,←) und Q(s,→)" : "Maus über eine Zelle: Q-Werte", p.x + p.w - 18, ly);
-
   // Unterzeile im Kopf
   textAlign(RIGHT, CENTER);
   textSize(12);
   fill(...FARBE.grau);
   text(
-    `${agent.anzahl} Zustände × 2 Aktionen · Farbe = bessere Aktion, Stärke = wie viel besser`,
-    p.x + p.w - 16,
+    `${agent.anzahl} Zustände × ${nA} Aktionen · Farbe = bessere Aktion` + (sz.export ? "" : ", Stärke = wie viel besser"),
+    p.x + p.w - (sz.export ? 140 : 16),
     p.y + KOPF_H / 2 + 1
   );
 }
@@ -1176,12 +1111,12 @@ function zeichneQTabelle() {
 function zelleUnterMaus() {
   const mx = mausX();
   const my = mausY();
-  if (mx < QT.x || mx > QT.x + QT.w || my < QT.y || my > QT.y + QT.h) {
+  if (mx < P_Q.x || mx > P_Q.x + P_Q.w || my < P_Q.y + KOPF_H || my > P_Q.y + P_Q.h - 36) {
     return null;
   }
   for (let s = 0; s < agent.anzahl; s++) {
-    const c = zelle(faecherAus(s));
-    if (mx >= c.x && mx < c.x + c.w && my >= c.y && my < c.y + c.h) {
+    const c = sz.qZelle(s);
+    if (c && mx >= c.x && mx < c.x + c.w && my >= c.y && my < c.y + c.h) {
       return s;
     }
   }
@@ -1192,36 +1127,34 @@ function zelleUnterMaus() {
 // Erklärung (mit den echten Zahlen) und Agentenkreislauf
 // =============================================================================
 function aktionText(a) {
-  return `${AKTION_NAME[a]} (${AKTION_TEXT[a]} schieben)`;
+  const akt = sz.aktionen()[a];
+  return `${akt.kurz} (${akt.text})`;
+}
+
+function qListe(q) {
+  const akt = sz.aktionen();
+  const st = sz.qStellen === undefined ? 2 : Math.max(sz.qStellen, 1);
+  return q.map((v, a) => `Q(s,${akt[a].kurz}) = ${zahl(v, st)}`).join("  ");
 }
 
 function erklaerung() {
+  const T = sz.texte;
   if (modus === "mensch") {
+    if (menschDiskret() && sch && sch.z2) {
+      const e = T.ausfuehren(sch);
+      return { titel: phase === "ende" ? "Episode vorbei" : "Deine Entscheidung", text: e.text, formeln: e.formeln.concat(mittelText("mensch")) };
+    }
     if (laeuft) {
-      return {
-        titel: "Selbst steuern",
-        text: "← und → schieben den Wagen. Lässt du los, rollt er frei. Der Stab darf nicht mehr als 12° kippen, der Wagen nicht aus der Bahn fahren.",
-        formeln: [`Schritt ${env.schritte} von 500   (1 Schritt = 0,02 s)`],
-      };
+      return { titel: "Selbst steuern", text: T.menschLaeuft, formeln: T.menschFormeln ? T.menschFormeln() : [] };
     }
-    const meine = kurve.filter((k) => k.art === "mensch");
-    const e = {
-      titel: "Selbst steuern: Wie gut bist du?",
-      text: "Erst selbst probieren: Halte ← oder → gedrückt, um den Wagen zu schieben. Schaffst du 500 Schritte (10 Sekunden)? Tipp: Unter „Tempo“ gibt es eine Zeitlupe. Danach lernt der Agent dieselbe Aufgabe – ohne die Physik zu kennen.",
-      formeln: [],
-    };
-    if (meine.length > 0) {
-      const best = Math.max(...meine.map((k) => k.schritte));
-      e.formeln.push(`Deine Versuche: ${meine.length}   bester: ${best} Schritte   letzter: ${meine[meine.length - 1].schritte}`);
-    }
-    return e;
+    return { titel: "Selbst steuern: Wie gut bist du?", text: T.menschIntro, formeln: mittelText("mensch") };
   }
 
   if (laeuft) {
     if (modus === "training") {
       return {
         titel: "Training läuft",
-        text: "Bei jedem Schritt: Zustand einordnen, Aktion wählen (ε-greedy), ausführen, Q-Wert anpassen. Zu Beginn probiert der Agent viel aus (ε groß), später nutzt er immer mehr sein Wissen. Beobachte, wie sich die Q-Tabelle einfärbt.",
+        text: T.trainingLaeuft || "Bei jedem Schritt: Zustand einordnen, Aktion wählen (ε-greedy), ausführen, Q-Wert anpassen. Zu Beginn probiert der Agent viel aus (ε groß), später nutzt er immer mehr sein Wissen. Beobachte, wie sich die Q-Tabelle einfärbt.",
         formeln: [
           `Episode ${agent.episoden - laufStart + 1} von ${episodenZiel}   ε = ${f2(agent.epsilon)}`,
           `bisher ${agent.updates} Q-Werte angepasst`,
@@ -1231,13 +1164,13 @@ function erklaerung() {
     if (modus === "zufall") {
       return {
         titel: "Zufallsagent",
-        text: "Der Zufallsagent wählt jede Aktion per Münzwurf und lernt nichts. So sieht man, wie schwer die Aufgabe ohne Wissen ist – der Vergleichswert für den lernenden Agenten.",
+        text: "Der Zufallsagent wählt jede Aktion zufällig und lernt nichts. So sieht man, wie schwer die Aufgabe ohne Wissen ist – der Vergleichswert für den lernenden Agenten.",
         formeln: mittelText("zufall"),
       };
     }
     return {
       titel: "Vorführen",
-      text: "Der Agent nutzt nur noch sein Wissen (ε = 0) und lernt nicht dazu: In jedem Zustand wählt er die Aktion mit dem größeren Q-Wert. Klick neben den Stab, um ihn anzustupsen – fängt der Agent das ab?",
+      text: T.vorfuehrenLaeuft || "Der Agent nutzt nur noch sein Wissen (ε = 0) und lernt nicht dazu: In jedem Zustand wählt er die Aktion mit dem größten Q-Wert.",
       formeln: mittelText("vorfuehren"),
     };
   }
@@ -1249,7 +1182,7 @@ function erklaerung() {
     if (modus === "zufall") {
       return {
         titel: "Zufallsagent",
-        text: "Ein Agent ohne Gedächtnis: Er wirft bei jedem Schritt eine Münze. Starte ihn oben oder gehe mit → Schritt für Schritt durch. Wie lange hält der Stab im Mittel?",
+        text: T.zufall || "Ein Agent ohne Gedächtnis: Er wählt jede Aktion zufällig. Starte ihn oben oder gehe mit → Schritt für Schritt durch.",
         formeln: mittelText("zufall"),
       };
     }
@@ -1261,47 +1194,33 @@ function erklaerung() {
   }
 
   const s = sch;
-  const F = agent.faecher;
 
   if (phase === "beobachten") {
-    const formeln = [];
-    if (F.x > 1) {
-      formeln.push(`x = ${vz(s.z.x, 2)} m → Fach ${s.f.x + 1} von ${F.x}     v = ${vz(s.z.v, 2)} m/s → Fach ${s.f.v + 1} von ${F.v}`);
-    }
-    formeln.push(`θ = ${grad(s.z.theta)}       → Fach ${s.f.theta + 1} von ${F.theta}  (${fachText("theta", s.f.theta)})`);
-    formeln.push(`ω = ${gradS(s.z.omega)}   → Fach ${s.f.omega + 1} von ${F.omega}  (${fachText("omega", s.f.omega)})`);
-    formeln.push(`Zustand s = ${s.s}:   Q(s,←) = ${f2(s.q[0])}   Q(s,→) = ${f2(s.q[1])}`);
-    return {
-      titel: "1 · Zustand beobachten",
-      text:
-        F.x > 1
-          ? "Der Agent misst die vier Werte und sortiert jeden in ein Fach. Die Kombination der Fächer ist der Zustand s – eine Zelle der Q-Tabelle (rot umrandet)."
-          : "Der Agent misst Winkel θ und Drehgeschwindigkeit ω und sortiert beide in Fächer. Die Kombination ist der Zustand s – eine Zelle der Q-Tabelle (rot umrandet). Die Wagenposition sieht er nicht.",
-      formeln,
-    };
+    const e = T.beobachten(s);
+    return { titel: "1 · Zustand beobachten", text: e.text, formeln: e.formeln.concat([`Zustand s = ${s.s}:   ${qListe(s.q)}`]) };
   }
 
   if (phase === "waehlen") {
     const formeln = [];
     let text;
     if (modus === "zufall") {
-      text = "Der Zufallsagent schaut gar nicht in die Tabelle – er wirft eine Münze.";
-      formeln.push(`Münzwurf → Aktion ${aktionText(s.wahl.a)}`);
+      text = "Der Zufallsagent schaut gar nicht in die Tabelle – er wählt zufällig.";
+      formeln.push(`Zufall → Aktion ${aktionText(s.wahl.a)}`);
     } else if (modus === "vorfuehren") {
-      text = "Beim Vorführen ist ε = 0: Der Agent nimmt immer die Aktion mit dem größeren Q-Wert.";
-      formeln.push(`Q(s,←) = ${f2(s.q[0])}   Q(s,→) = ${f2(s.q[1])}`);
+      text = "Beim Vorführen ist ε = 0: Der Agent nimmt immer die Aktion mit dem größten Q-Wert.";
+      formeln.push(qListe(s.q));
       formeln.push(`→ Aktion ${aktionText(s.wahl.a)}`);
     } else {
       text =
-        "ε-greedy: Mit Wahrscheinlichkeit ε probiert der Agent etwas Zufälliges aus (Erkunden), sonst nimmt er die Aktion mit dem größeren Q-Wert (Wissen nutzen).";
+        "ε-greedy: Mit Wahrscheinlichkeit ε probiert der Agent etwas Zufälliges aus (Erkunden), sonst nimmt er die Aktion mit dem größten Q-Wert (Wissen nutzen).";
       if (s.wahl.erkunden) {
         formeln.push(`Zufallszahl ${s.wahl.zufall.toFixed(3)} < ε = ${f2(s.eps)}   → Erkunden!`);
         formeln.push(`zufällige Aktion: ${aktionText(s.wahl.a)}`);
       } else {
         formeln.push(`Zufallszahl ${s.wahl.zufall.toFixed(3)} ≥ ε = ${f2(s.eps)}   → Wissen nutzen`);
-        const vergleich = s.q[0] === s.q[1] ? "=" : s.q[0] > s.q[1] ? ">" : "<";
-        formeln.push(`Q(s,←) = ${f2(s.q[0])}  ${vergleich}  Q(s,→) = ${f2(s.q[1])}`);
-        formeln.push(`→ Aktion ${aktionText(s.wahl.a)}${vergleich === "=" ? "  (Gleichstand: Münzwurf)" : ""}`);
+        formeln.push(qListe(s.q));
+        const gleich = s.q.filter((v) => v === Math.max(...s.q)).length > 1;
+        formeln.push(`→ größter Wert: Aktion ${aktionText(s.wahl.a)}${gleich ? "  (Gleichstand: Zufall)" : ""}`);
       }
     }
     return { titel: "2 · Aktion wählen", text, formeln };
@@ -1309,14 +1228,15 @@ function erklaerung() {
 
   if (!ui.phasen.checked() && (phase === "ausfuehren" || phase === "lernen")) {
     // ein ganzer Schritt auf einmal: kurze Fassung
+    const akt = sz.aktionen();
     const formeln = [
-      `s = ${s.s}  →  Aktion ${AKTION_NAME[s.wahl.a]}${s.wahl.erkunden && modus === "training" ? " (erkundet)" : ""}  →  s' = ${s.s2}`,
-      `θ: ${grad(s.z.theta)} → ${grad(s.z2.theta)}     ω: ${gradS(s.z.omega)} → ${gradS(s.z2.omega)}`,
-      `Belohnung r = ${s.r > 0 ? "+" : ""}${s.r}${s.gescheitert ? "  (Episode vorbei)" : ""}`,
+      `s = ${s.s}  →  Aktion ${akt[s.wahl.a].kurz}${s.wahl.erkunden && modus === "training" ? " (erkundet)" : ""}  →  s' = ${s.s2}`,
+      T.kurz(s),
+      `Belohnung r = ${belohnungText(s.r)}${s.terminal ? "  (abgeschlossen)" : ""}`,
     ];
     if (s.upd) {
       const u = s.upd;
-      formeln.push(`Q(s,${AKTION_NAME[s.wahl.a]}) ← ${f2(u.alt)} + ${f2(u.alpha)}·(${f2(u.ziel)} − ${f2(u.alt)}) = ${f2(u.neu)}`);
+      formeln.push(`Q(s,${akt[s.wahl.a].kurz}) ← ${f2(u.alt)} + ${f2(u.alpha)}·(${f2(u.ziel)} − ${f2(u.alt)}) = ${f2(u.neu)}`);
     }
     return {
       titel: "Ein ganzer Schritt",
@@ -1326,34 +1246,26 @@ function erklaerung() {
   }
 
   if (phase === "ausfuehren") {
-    const formeln = [
-      `θ: ${grad(s.z.theta)} → ${grad(s.z2.theta)}     ω: ${gradS(s.z.omega)} → ${gradS(s.z2.omega)}`,
-      `x: ${vz(s.z.x, 2)} → ${vz(s.z2.x, 2)} m     neuer Zustand s' = ${s.s2}`,
-      s.gescheitert
-        ? `Belohnung r = ${s.r}   (${env.grund === "bahn" ? "aus der Bahn" : "Stab umgefallen"} – Episode vorbei)`
-        : `Belohnung r = +1   (Stab steht noch)`,
-    ];
-    return {
-      titel: "3 · Aktion ausführen",
-      text: `Der Wagen wird 0,02 s lang mit 10 N ${AKTION_TEXT[s.wahl.a]} geschoben. Die Umgebung meldet den neuen Zustand s' (gestrichelt) und eine Belohnung r.`,
-      formeln,
-    };
+    const e = T.ausfuehren(s);
+    return { titel: "3 · Aktion ausführen", text: e.text, formeln: e.formeln };
   }
 
   if (phase === "lernen") {
     const u = s.upd;
-    const an = AKTION_NAME[s.wahl.a];
+    const an = sz.aktionen()[s.wahl.a].kurz;
     const formeln = [];
-    if (u.gescheitert) {
-      formeln.push(`Ziel = r = ${u.r}    (danach kommt nichts mehr – die Episode ist vorbei)`);
+    if (u.terminal) {
+      formeln.push(`Ziel = r = ${belohnungText(u.r)}    (${T.terminalText || "danach kommt nichts mehr"})`);
     } else {
-      formeln.push(`Ziel = r + γ · max Q(s',·) = ${u.r} + ${f2(u.gamma)} · ${f2(u.maxNeu)} = ${f2(u.ziel)}`);
+      formeln.push(`Ziel = r + γ · max Q(s',·) = ${belohnungText(u.r)} + ${f2(u.gamma)} · ${klammer(u.maxNeu)} = ${f2(u.ziel)}`);
     }
-    formeln.push(`Fehler = Ziel − Q(s,${an}) = ${f2(u.ziel)} − ${f2(u.alt)} = ${vz(u.fehler, 2)}`);
+    formeln.push(`Fehler = Ziel − Q(s,${an}) = ${f2(u.ziel)} − ${klammer(u.alt)} = ${vz(u.fehler, 2)}`);
     formeln.push(`Q(s,${an}) ← ${f2(u.alt)} + ${f2(u.alpha)} · ${klammer(u.fehler)} = ${f2(u.neu)}`);
     return {
       titel: "4 · Q-Wert anpassen",
-      text: "Das Ziel ist die Belohnung jetzt plus der (mit γ abgezinste) beste Wert im neuen Zustand. Der Unterschied zum alten Q-Wert ist die Überraschung – davon wird der Anteil α übernommen.",
+      text: u.terminal && T.lernenTerminal
+        ? T.lernenTerminal
+        : "Das Ziel ist die Belohnung jetzt plus der (mit γ abgezinste) beste Wert im neuen Zustand. Der Unterschied zum alten Q-Wert ist die Überraschung – davon wird der Anteil α übernommen.",
       formeln,
     };
   }
@@ -1362,7 +1274,7 @@ function erklaerung() {
     const k = kurve[kurve.length - 1];
     return {
       titel: "Episode vorbei",
-      text: `${k.grund === "geschafft" ? "Geschafft: 500 Schritte (10 Sekunden) balanciert" : GRUND_TEXT[k.grund] + " nach " + k.schritte + " Schritten"}. Mit → beginnt eine neue Episode – die Q-Tabelle bleibt erhalten.${
+      text: `${T.ende(k)} Mit → beginnt eine neue Episode – die Q-Tabelle bleibt erhalten.${
         modus === "training" && ui.epsAb.checked() ? " ε wurde etwas kleiner." : ""
       }`,
       formeln: modus === "training" ? [`ε = ${f2(agent.epsilon)}   Episoden gelernt: ${agent.episoden}`] : [],
@@ -1371,13 +1283,21 @@ function erklaerung() {
   return { titel: "", text: "", formeln: [] };
 }
 
+function belohnungText(r) {
+  const st = Number.isInteger(r) ? 0 : 2;
+  return (r > 0 ? "+" : r < 0 ? "−" : "") + Math.abs(r).toFixed(st);
+}
+
 function mittelText(art) {
   const liste = kurve.filter((k) => k.art === art);
   if (liste.length === 0) {
     return [];
   }
-  const m = liste.reduce((a, k) => a + k.schritte, 0) / liste.length;
-  return [`${liste.length} Episoden   im Mittel ${m.toFixed(0)} Schritte   bester Lauf: ${Math.max(...liste.map((k) => k.schritte))}`];
+  const kv = sz.kurve;
+  const m = liste.reduce((a, k) => a + k.wert, 0) / liste.length;
+  const werte = liste.map((k) => k.wert);
+  const best = kv.besserHoch === false ? Math.min(...werte) : Math.max(...werte);
+  return [`${liste.length} Episoden   im Mittel ${kv.format(m)}   beste: ${kv.format(best)}`];
 }
 
 function trainingsFazit() {
@@ -1385,25 +1305,15 @@ function trainingsFazit() {
   if (tr.length < 10) {
     return {
       titel: "Training mit Q-Learning",
-      text: "Der Agent kennt die Physik nicht. Er probiert aus und merkt sich in der Q-Tabelle, wie viel Belohnung jede Aktion in jedem Zustand gebracht hat. Gehe mit → Schritt für Schritt durch oder starte oben das Training.",
+      text: sz.texte.start,
       formeln: ["Q(s,a) ← Q(s,a) + α · ( r + γ · max Q(s',·) − Q(s,a) )"],
     };
   }
-  const letzte = tr.slice(-20);
-  const m = letzte.reduce((a, k) => a + k.schritte, 0) / letzte.length;
-  const bahn = letzte.filter((k) => k.grund === "bahn").length;
-  const geschafft = letzte.filter((k) => k.grund === "geschafft").length;
-  let text = `Nach ${agent.episoden} Episoden hält der Stab im Mittel ${m.toFixed(0)} Schritte (letzte 20 Episoden, ${geschafft}× geschafft). `;
-  if (agent.epsilon > 0.2) {
-    text += "ε ist noch groß – der Agent probiert viel aus. Weitertrainieren oder unter „Vorführen“ ohne Ausprobieren testen.";
-  } else if (bahn >= 5 && agent.faecher.x === 1) {
-    text += `${bahn}× fuhr der Wagen aus der Bahn: Der Agent sieht die Wagenposition nicht! Tipp: Zustand „Stab + Wagen“ und Belohnung „Strafe −100“ wählen, dann 1000 Episoden trainieren.`;
-  } else if (m < 150) {
-    text += "Das reicht noch nicht. Tipp: weitertrainieren, Lernrate α ändern oder „Q-Tabelle leeren“ und neu beginnen.";
-  } else {
-    text += "Schau dir unter „Vorführen“ an, was der Agent gelernt hat.";
-  }
-  return { titel: "Training beendet", text, formeln: ["Q(s,a) ← Q(s,a) + α · ( r + γ · max Q(s',·) − Q(s,a) )"] };
+  return {
+    titel: "Training beendet",
+    text: sz.texte.fazit(tr.slice(-20)),
+    formeln: ["Q(s,a) ← Q(s,a) + α · ( r + γ · max Q(s',·) − Q(s,a) )"],
+  };
 }
 
 function zeichneErklaerung() {
@@ -1430,7 +1340,7 @@ function zeichneErklaerung() {
   } else {
     fill(...FARBE.grau);
     const zeilen = umbrechen(e.text, textB);
-    const maxZ = modus === "mensch" ? 5 : e.formeln.length >= 4 ? 2 : 3;
+    const maxZ = e.formeln.length === 0 ? 7 : e.formeln.length >= 4 ? 2 : e.formeln.length === 3 ? 3 : 4;
     for (const z of zeilen.slice(0, maxZ)) {
       text(z, p.x + 16, ty);
       ty += 18;
@@ -1442,7 +1352,7 @@ function zeichneErklaerung() {
   textSize(13);
   fill(...FARBE.text);
   for (const f of e.formeln) {
-    if (ty + 16 > unten + (modus === "mensch" ? 40 : 0)) {
+    if (ty + 16 > unten + 40) {
       break;
     }
     text(f, p.x + 16, ty);
@@ -1483,13 +1393,12 @@ function zeichneKreislauf() {
     text(unter, (x0 + x1) / 2, y + 23);
   };
   if (modus === "mensch") {
-    kasten(yA, "Du", "schaust hin, drückst ← oder →", laeuft);
+    kasten(yA, "Du", sz.texte.menschKreislauf, laeuft || menschDiskret());
   } else {
     kasten(yA, "Agent", phase === "lernen" ? "passt Q-Tabelle an" : "Q-Tabelle, wählt Aktion", aktivAgent);
   }
-  kasten(yU, "Umgebung", "Wagen mit Stab · Physik", aktivUmw);
+  kasten(yU, "Umgebung", sz.umgebungKurz, aktivUmw);
 
-  // Pfeil rechts: Aktion nach unten
   const pfeil = (x, yVon, yBis, aktiv) => {
     stroke(...(aktiv ? FARBE.akzent : FARBE.blass));
     strokeWeight(aktiv ? 2.5 : 1.5);
@@ -1531,9 +1440,9 @@ function zeichneEinstellungen() {
   textAlign(LEFT, TOP);
   fill(...FARBE.grau);
   const tipps = {
-    mensch: "Tipp: In der Zeitlupe ist es viel leichter.\nLässt du beide Tasten los, rollt der Wagen frei.",
+    mensch: sz.texte.menschTipp,
     zufall: "α, γ und ε spielen hier keine Rolle:\nDer Zufallsagent lernt nicht.",
-    training: "α: Wie stark zählt neue Erfahrung?\nγ: Wie wichtig ist die Zukunft?\nε: Wie oft wird zufällig ausprobiert?",
+    training: sz.texte.trainingTipp || "α: Wie stark zählt neue Erfahrung?\nγ: Wie wichtig ist die Zukunft?\nε: Wie oft wird zufällig ausprobiert?",
     vorfuehren: "Beim Vorführen gilt ε = 0, und es wird\nnicht gelernt. „Turbo“ zeigt schnell den\nMittelwert vieler Episoden.",
   };
   text(tipps[modus], 1240, 818);
@@ -1543,19 +1452,23 @@ function zeichneEinstellungen() {
 // Tooltip und Fehlermeldung
 // -----------------------------------------------------------------------------
 function zeichneTooltip() {
+  if (exportOffen()) {
+    return;
+  }
   const s = zelleUnterMaus();
   if (s === null) {
     return;
   }
-  const f = faecherAus(s);
-  const F = agent.faecher;
-  const zeilen = [`Zustand s = ${s}   (${agent.besuche[s]}× angepasst)`];
-  if (F.x > 1) {
-    zeilen.push(`x: ${fachText("x", f.x)}   v: ${fachText("v", f.v)}`);
+  const akt = sz.aktionen();
+  const zeilen = [`Zustand s = ${s}   (${agent.besuche[s]}× angepasst)`].concat(sz.zustandsZeilen(s));
+  const st = sz.qStellen === undefined ? 2 : Math.max(sz.qStellen, 1);
+  for (let a = 0; a < akt.length; a += 2) {
+    let z = `Q(s,${akt[a].kurz}) = ${zahl(agent.q[s][a], st)}`;
+    if (a + 1 < akt.length) {
+      z += `    Q(s,${akt[a + 1].kurz}) = ${zahl(agent.q[s][a + 1], st)}`;
+    }
+    zeilen.push(z);
   }
-  zeilen.push(`θ: ${fachText("theta", f.theta)}`);
-  zeilen.push(`ω: ${fachText("omega", f.omega)}`);
-  zeilen.push(`Q(s,←) = ${f2(agent.q[s][0])}    Q(s,→) = ${f2(agent.q[s][1])}`);
 
   textFont(MONO);
   textSize(12);
@@ -1603,23 +1516,35 @@ function zeichneFehlerMeldung() {
 // Eingaben
 // =============================================================================
 function mousePressed() {
+  if (exportOffen()) {
+    return;
+  }
   const mx = mausX();
   const my = mausY();
+  if (menschDiskret()) {
+    for (const k of menschKnopfFlaechen()) {
+      if (mx >= k.x && mx <= k.x + k.w && my >= k.y && my <= k.y + k.h) {
+        menschSchritt(k.a);
+        return;
+      }
+    }
+  }
   const p = P_UMW;
   if (mx < p.x || mx > p.x + p.w || my < p.y + KOPF_H || my > p.y + p.h) {
     return;
   }
-  if (env.vorbei) {
-    return;
+  if (sz.klick) {
+    sz.klick(mx, my);
   }
-  // links vom Stab geklickt → Stab nach rechts stupsen und umgekehrt
-  const wx = MITTE_X + env.x * PX_M;
-  const richtung = mx < wx ? 1 : -1;
-  env.stups(richtung * 0.6);
-  stupsAnzeige = { x: mx, y: my, t0: millis() };
 }
 
 function keyPressed() {
+  if (exportOffen()) {
+    if (key === "Escape") {
+      exportSchliessen();
+    }
+    return true;
+  }
   // Tasten nicht abfangen, wenn eine Auswahlliste oder ein Textfeld den Fokus hat
   const el = document.activeElement;
   if (el && (el.tagName === "SELECT" || el.tagName === "TEXTAREA" ||
@@ -1633,14 +1558,23 @@ function keyPressed() {
     aktionsKnopf();
     return false;
   }
+  const ziffer = "123456789".indexOf(key);
   if (modus === "mensch") {
-    if ((key === "ArrowLeft" || key === "ArrowRight") && !laeuft) {
+    if (menschDiskret()) {
+      if (ziffer >= 0) {
+        menschSchritt(ziffer);
+        return false;
+      }
+      return true;
+    }
+    const taste = (sz.menschTasten || []).includes(key) || (ziffer >= 0 && ziffer < agent.nA);
+    if (taste && !laeuft) {
       starten();
     }
-    if (key === "ArrowLeft" || key === "ArrowRight") {
-      return false;
+    if (ziffer >= 0) {
+      menschTaste = ziffer;
     }
-    return true;
+    return taste ? false : true;
   }
   if (key === "ArrowRight") {
     schrittVor();
@@ -1652,15 +1586,15 @@ function keyPressed() {
 // =============================================================================
 // Q-Tabelle speichern und laden
 // =============================================================================
-function tabelleSpeichern() {
+function datumsName(endung) {
   const jetzt = new Date();
   const datum = jetzt.toISOString().split("T")[0];
   const uhr = jetzt.toTimeString().split(" ")[0].replace(/:/g, "-");
-  const name = prompt("Dateiname:", `${datum}_${uhr}_q-tabelle.json`);
-  if (name === null) {
-    return;
-  }
-  const blob = new Blob([JSON.stringify(agent.alsJSON())], { type: "application/json" });
+  return `${datum}_${uhr}_${sz.id}_${endung}`;
+}
+
+function herunterladen(name, inhalt, typ) {
+  const blob = new Blob([inhalt], { type: typ });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.download = name;
@@ -1671,6 +1605,14 @@ function tabelleSpeichern() {
   URL.revokeObjectURL(url);
 }
 
+function tabelleSpeichern() {
+  const name = prompt("Dateiname:", datumsName("q-tabelle.json"));
+  if (name === null) {
+    return;
+  }
+  herunterladen(name, JSON.stringify(agent.alsJSON(sz.id, Object.assign({}, sz.einstellung))), "application/json");
+}
+
 function dateiGewaehlt(datei) {
   if (!datei || !datei.name || !datei.name.toLowerCase().endsWith(".json")) {
     alert("Bitte eine JSON-Datei wählen.");
@@ -1679,13 +1621,84 @@ function dateiGewaehlt(datei) {
   const leser = new FileReader();
   leser.onload = (ev) => {
     try {
-      agent.ausJSON(JSON.parse(ev.target.result));
+      let d = JSON.parse(ev.target.result);
+      if (d && d.typ === "q-tabelle-wagen-mit-stab") {
+        // Dateien aus der ersten Programmversion
+        d = Object.assign({}, d, { typ: "q-tabelle", szenario: "wagen", einstellung: { zustand: d.art, belohnung: String(d.strafe || 0) } });
+      }
+      if (!d || d.typ !== "q-tabelle" || !SZENARIEN[d.szenario]) {
+        throw new Error("Das ist keine Q-Tabelle aus diesem Programm.");
+      }
+      szenarioWechseln(d.szenario);
+      const ziel = SZENARIEN[d.szenario];
+      for (const o of ziel.optionen) {
+        if (d.einstellung && d.einstellung[o.key] !== undefined && o.werte.some((w) => w[0] === d.einstellung[o.key])) {
+          ziel.einstellung[o.key] = d.einstellung[o.key];
+        }
+      }
+      const neu = neuerAgent(ziel);
+      neu.ausJSON(d);
+      agent = neu;
       kurve = [];
       allesZuruecksetzen();
+      uiAusSzenario();
     } catch (err) {
       alert("Die Q-Tabelle konnte nicht geladen werden: " + err.message);
     }
   };
   leser.readAsText(datei.file);
   ui.datei.elt.value = "";
+}
+
+// =============================================================================
+// SPS-Export: die gelernte Strategie als SCL-Code (TIA Portal, IEC 61131-3 ST)
+// =============================================================================
+function sclCode() {
+  const ex = sz.export;
+  const akt = sz.aktionen();
+  const z = [];
+  const jetzt = new Date();
+  z.push(`// =====================================================================`);
+  z.push(`//  Strategie aus Q-Learning: ${ex.titel}`);
+  z.push(`//  trainiert am ${jetzt.toLocaleDateString("de-DE")} · ${agent.episoden} Episoden · γ = ${f2(agent.gamma)}`);
+  z.push(`//  Erzeugt mit „KI lernt“ (Jakob-Preh-Schule). Die Tabelle wurde in der`);
+  z.push(`//  Simulation gelernt – vor dem Einsatz an der Anlage prüfen!`);
+  z.push(`// =====================================================================`);
+  z.push(`//  Eingänge:`);
+  for (const e of ex.eingaenge) {
+    z.push(`//    ${e}`);
+  }
+  z.push(`//  Ausgang:  ${ex.ausgang}`);
+  for (let a = 0; a < akt.length; a++) {
+    z.push(`//    ${a} = ${akt[a].text}`);
+  }
+  z.push(`// ---------------------------------------------------------------------`);
+  z.push("");
+  for (const zeile of ex.zustandsNummer()) {
+    z.push(zeile);
+  }
+  z.push("");
+  z.push(`CASE #Zustand OF`);
+  let nie = 0;
+  for (let s = 0; s < agent.anzahl; s++) {
+    const besucht = agent.besuche[s] > 0;
+    const a = besucht ? besteVon(agent.q[s]) : -1;
+    const wahl = a >= 0 ? a : ex.vorgabe;
+    let kommentar = ex.zustandsKommentar(s);
+    if (!besucht) {
+      kommentar += "  (nie besucht – Vorgabe)";
+      nie++;
+    } else if (a < 0) {
+      kommentar += "  (Gleichstand – Vorgabe)";
+    }
+    z.push(`    ${String(s).padStart(2)}: #Aktion := ${wahl};   // ${akt[wahl].text.padEnd(18)} | ${kommentar}`);
+  }
+  z.push(`ELSE`);
+  z.push(`    #Aktion := ${ex.vorgabe};   // ${akt[ex.vorgabe].text}`);
+  z.push(`END_CASE;`);
+  if (nie > 0) {
+    z.push("");
+    z.push(`// Hinweis: ${nie} Zustände wurden im Training nie besucht.`);
+  }
+  return z.join("\n");
 }

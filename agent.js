@@ -1,8 +1,8 @@
 // =============================================================================
 //  agent.js – Q-Learning mit einer Tabelle (ohne p5, reines JavaScript)
 // =============================================================================
-//  1. Zustand beobachten   Die vier Messwerte werden in Fächer (Bereiche)
-//                          einsortiert → eine Zeile s der Q-Tabelle.
+//  1. Zustand beobachten   Die Messwerte werden eingeordnet → eine Zeile s
+//                          der Q-Tabelle.
 //  2. Aktion wählen        ε-greedy: mit Wahrscheinlichkeit ε zufällig
 //                          (Erkunden), sonst die Aktion mit dem größten Q-Wert.
 //  3. Aktion ausführen     Die Umgebung liefert den neuen Zustand s' und die
@@ -11,96 +11,49 @@
 //
 //  Q(s,a) ist die Schätzung: "Wie viel Belohnung bekomme ich insgesamt noch,
 //  wenn ich im Zustand s die Aktion a wähle und danach gut weiterspiele?"
+//
+//  Der Agent weiß nichts über die Aufgabe: Er kennt nur die Anzahl der
+//  Zustände und Aktionen. Was ein Zustand bedeutet, steht im Szenario.
 // =============================================================================
 
-// Welche Messwerte der Agent sieht und in wie viele Fächer sie geteilt werden.
-// Werte außerhalb des Bereichs landen im ersten bzw. letzten Fach.
-const ZUSTAENDE = {
-  einfach: {
-    name: "nur Stab",
-    faecher: { x: 1, v: 1, theta: 6, omega: 8 },
-  },
-  voll: {
-    name: "Stab + Wagen",
-    faecher: { x: 3, v: 3, theta: 6, omega: 8 },
-  },
-};
-
-const BEREICH = {
-  x: 2.4, // m
-  v: 1.0, // m/s
-  theta: PHYSIK.thetaMax, // rad (12°)
-  omega: 1.5, // rad/s (≈ 86 °/s)
-};
-
-const MESSWERTE = ["x", "v", "theta", "omega"];
-
 class QAgent {
-  constructor(zustandsArt) {
+  constructor(anzahl, aktionen) {
     this.alpha = 0.2; // Lernrate
     this.gamma = 0.99; // Abzinsung: wie wichtig ist die Zukunft?
     this.epsilon = 1.0; // Anteil zufälliger Aktionen
     this.epsilonMin = 0.01;
     this.epsilonFaktor = 0.97; // ε wird nach jeder Episode damit multipliziert
-    this.strafe = 0; // Strafe beim Scheitern (0 oder −100): umgefallen oder aus der Bahn
-    this.neuAufbauen(zustandsArt || "einfach");
+    this.neuAufbauen(anzahl || 1, aktionen || 2);
   }
 
-  neuAufbauen(zustandsArt) {
-    this.art = zustandsArt;
-    this.faecher = Object.assign({}, ZUSTAENDE[zustandsArt].faecher);
-    this.anzahl = this.faecher.x * this.faecher.v * this.faecher.theta * this.faecher.omega;
+  neuAufbauen(anzahl, aktionen) {
+    this.anzahl = anzahl;
+    this.nA = aktionen;
     this.q = [];
     this.besuche = [];
-    for (let s = 0; s < this.anzahl; s++) {
-      this.q.push([0, 0]);
+    for (let s = 0; s < anzahl; s++) {
+      this.q.push(new Array(aktionen).fill(0));
       this.besuche.push(0);
     }
     this.episoden = 0;
     this.updates = 0;
   }
 
-  // Nummer des Fachs, in das ein Messwert fällt (0 … n−1)
-  fach(wert, groesse) {
-    const n = this.faecher[groesse];
-    if (n <= 1) {
-      return 0;
-    }
-    const b = BEREICH[groesse];
-    const anteil = (wert + b) / (2 * b);
-    return Math.min(n - 1, Math.max(0, Math.floor(anteil * n)));
+  maxQ(s) {
+    return Math.max(...this.q[s]);
   }
 
-  // Fachgrenzen eines Messwerts (für die Anzeige)
-  grenzen(groesse) {
-    const n = this.faecher[groesse];
-    const b = BEREICH[groesse];
-    const g = [];
-    for (let i = 1; i < n; i++) {
-      g.push(-b + (2 * b * i) / n);
-    }
-    return g;
-  }
-
-  // Zustand → Fächer und Zeilennummer s der Q-Tabelle
-  einordnen(z) {
-    const f = {
-      x: this.fach(z.x, "x"),
-      v: this.fach(z.v, "v"),
-      theta: this.fach(z.theta, "theta"),
-      omega: this.fach(z.omega, "omega"),
-    };
-    const F = this.faecher;
-    const s = ((f.x * F.v + f.v) * F.theta + f.theta) * F.omega + f.omega;
-    return { f, s };
-  }
-
+  // Aktion mit dem größten Q-Wert; bei Gleichstand entscheidet der Zufall
   besteAktion(s) {
     const q = this.q[s];
-    if (q[0] === q[1]) {
-      return Math.random() < 0.5 ? 0 : 1; // Gleichstand: Münzwurf
+    const m = Math.max(...q);
+    const kandidaten = [];
+    for (let a = 0; a < q.length; a++) {
+      if (q[a] === m) {
+        kandidaten.push(a);
+      }
     }
-    return q[1] > q[0] ? 1 : 0;
+    return kandidaten[Math.floor(Math.random() * kandidaten.length)];
   }
 
   // ε-greedy. Liefert auch die Zufallszahl, damit man die Wahl nachvollziehen kann.
@@ -108,26 +61,24 @@ class QAgent {
     const e = eps === undefined ? this.epsilon : eps;
     const zufall = Math.random();
     if (zufall < e) {
-      return { a: Math.random() < 0.5 ? 0 : 1, zufall, erkunden: true };
+      return { a: Math.floor(Math.random() * this.nA), zufall, erkunden: true };
     }
     return { a: this.besteAktion(s), zufall, erkunden: false };
   }
 
   // Der eigentliche Lernschritt. Gibt alle Zwischenwerte zurück (für die Erklärung).
-  lernen(s, a, r, s2, gescheitert) {
+  // terminal: Nach diesem Schritt kommt nichts mehr, das von dieser Entscheidung
+  // abhängt (Stab umgefallen, Werkstück einsortiert …) → Ziel = r.
+  lernen(s, a, r, s2, terminal) {
     const alt = this.q[s][a];
-    const maxNeu = gescheitert ? 0 : Math.max(this.q[s2][0], this.q[s2][1]);
-    const ziel = r + (gescheitert ? 0 : this.gamma * maxNeu);
+    const maxNeu = terminal ? 0 : this.maxQ(s2);
+    const ziel = r + (terminal ? 0 : this.gamma * maxNeu);
     const fehler = ziel - alt; // TD-Fehler: Überraschung
     const neu = alt + this.alpha * fehler;
     this.q[s][a] = neu;
     this.besuche[s]++;
     this.updates++;
-    return { alt, maxNeu, ziel, fehler, neu, gescheitert, r, s, a, s2, alpha: this.alpha, gamma: this.gamma };
-  }
-
-  belohnung(gescheitert) {
-    return gescheitert ? 1 + this.strafe : 1;
+    return { alt, maxNeu, ziel, fehler, neu, terminal, r, s, a, s2, alpha: this.alpha, gamma: this.gamma };
   }
 
   episodeBeendet(epsilonAbnehmend) {
@@ -147,35 +98,30 @@ class QAgent {
     return n;
   }
 
-  alsJSON() {
+  alsJSON(szenario, einstellung) {
     return {
-      typ: "q-tabelle-wagen-mit-stab",
-      art: this.art,
-      faecher: this.faecher,
+      typ: "q-tabelle",
+      szenario,
+      einstellung,
       alpha: this.alpha,
       gamma: this.gamma,
       epsilon: this.epsilon,
-      strafe: this.strafe,
       episoden: this.episoden,
-      q: this.q.map((z) => [Number(z[0].toFixed(4)), Number(z[1].toFixed(4))]),
+      q: this.q.map((z) => z.map((v) => Number(v.toFixed(4)))),
       besuche: this.besuche,
     };
   }
 
+  // Werte aus einer Datei übernehmen (Größe muss vorher passend aufgebaut sein)
   ausJSON(d) {
-    if (!d || d.typ !== "q-tabelle-wagen-mit-stab" || !ZUSTAENDE[d.art]) {
-      throw new Error("Das ist keine Q-Tabelle aus diesem Programm.");
+    if (!Array.isArray(d.q) || d.q.length !== this.anzahl || !d.q.every((z) => Array.isArray(z) && z.length === this.nA)) {
+      throw new Error("Die Tabelle passt nicht zu dieser Aufgabe.");
     }
-    this.neuAufbauen(d.art);
-    if (!Array.isArray(d.q) || d.q.length !== this.anzahl) {
-      throw new Error("Die Tabelle passt nicht zu dieser Programmversion.");
-    }
-    this.q = d.q.map((z) => [Number(z[0]) || 0, Number(z[1]) || 0]);
-    this.besuche = Array.isArray(d.besuche) ? d.besuche.map((b) => Number(b) || 0) : this.besuche;
+    this.q = d.q.map((z) => z.map((v) => Number(v) || 0));
+    this.besuche = Array.isArray(d.besuche) && d.besuche.length === this.anzahl ? d.besuche.map((b) => Number(b) || 0) : this.besuche;
     this.alpha = Number(d.alpha) || this.alpha;
-    this.gamma = Number(d.gamma) || this.gamma;
+    this.gamma = typeof d.gamma === "number" ? d.gamma : this.gamma;
     this.epsilon = typeof d.epsilon === "number" ? d.epsilon : this.epsilon;
-    this.strafe = Number(d.strafe) || 0;
     this.episoden = Number(d.episoden) || 0;
   }
 }
